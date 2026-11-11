@@ -1,7 +1,7 @@
 import numpy as np
 
 from sanger_seq_analyzer.abi import read_ab1
-from sanger_seq_analyzer.qc import QCSettings, call_mixtures, mott_trim, qc_read
+from sanger_seq_analyzer.qc import QCSettings, mott_trim, qc_read, uncalled_peaks
 from sanger_seq_analyzer.simulate import make_read
 
 
@@ -32,14 +32,16 @@ def test_75_percent_cutoff(tmp_path):
     below = qc_read(read_ab1(tmp_path / "below_F.ab1"))
     assert above.passed and above.good_fraction >= 0.75
     assert not below.passed and "75%" in below.reasons[0]
-    # The cutoff is configurable.
     assert qc_read(read_ab1(tmp_path / "below_F.ab1"), QCSettings(min_good_fraction=0.70)).passed
 
 
-def test_mixture_called_with_iupac(tmp_path):
+def test_uncalled_peak_area_at_mixture(tmp_path):
     rng = np.random.default_rng(5)
     template = "".join(rng.choice(list("ACGT"), 300))
     template = template[:150] + "R" + template[151:]
     make_read(tmp_path / "m_F.ab1", "m", template, rng)
-    seq, _ = call_mixtures(read_ab1(tmp_path / "m_F.ab1"), 0.20)
-    assert seq[150] == "R"
+    chrom = read_ab1(tmp_path / "m_F.ab1")
+    uncalled, ratios = uncalled_peaks(chrom)
+    assert {chrom.sequence[150], uncalled[150]} == {"A", "G"}
+    assert ratios[150] >= 0.20  # RECall mixture area
+    assert np.median(ratios) < 0.05  # clean positions have small secondary peaks

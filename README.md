@@ -1,76 +1,116 @@
 # sanger_seq_analyzer
 
 Sanger sequencing analysis for Windows and macOS (also Linux). It reads `.ab1`
-chromatograms, checks the quality of each forward and reverse read, calls mixed
-bases, and writes a forward/reverse consensus FASTA, in the spirit of
-[RECall](https://recall.bccfe.ca/). QC is the first module. The package is set up so
+chromatograms, applies your lab's read-quality cutoff, assembles forward and reverse
+reads against a reference, and calls, marks and passes or fails each sample using the rules
+of [RECall](https://recall.bccfe.ca/) (Woods et al., *J Clin Microbiol* 2012;50:1936-42).
+Samples that pass are exported as FASTA. QC is the first module. The package is set up so
 more tools can be added as extra commands.
 
-## What it does
+## Rules
 
-For every sample with a forward (`_F`) and reverse (`_R`) read:
+### 1. Lab read rules (checked first)
 
-1. **Read QC.** A read **passes** when **at least 75% of its bases have Phred quality ≥ 20**
-   (QV20 means 99% base-call accuracy, the same "QV20+" figure ABI software reports) and
-   at least 100 bp remain after trimming. You can change both numbers.
-2. **Trimming.** Low-quality ends are removed with Mott's algorithm (error limit 0.05,
-   the method used by phred and Geneious).
-3. **Mixture calling.** If a second peak is at least 20% as tall as the called peak, the
-   base becomes an IUPAC code (R, Y, K, M, S, W, …). This is only done inside the trimmed region.
-4. **Consensus.** The reverse read is reverse-complemented and aligned to the forward read.
-   - Where both reads cover a position: a mixture is kept only if both reads support it.
-     If the reads disagree, the base comes from the read that is clearly better (≥10 QV higher).
-     Otherwise the base is `N`.
-   - Where only one read covers a position: the base is kept if it is ≥ Q20, otherwise it is `N`.
-   - The sample fails if the reads overlap by less than 20 bp or agree at less than 90% of the overlap.
-5. **Reference (optional).** The consensus is turned to match the strand of a reference
-   FASTA, and its identity to the reference is reported.
+| Rule | Default |
+|---|---|
+| A read passes when this share of its bases are ≥ Q20 | **75%** |
+| Minimum read length after trimming | 100 bp |
+| Each sample needs both a forward and a reverse read | yes (`--allow-one-direction` turns this off) |
 
-| Sample status | Meaning | Written to |
-|---|---|---|
-| `PASS` | both reads passed and they agree | `consensus.fasta` |
-| `SINGLE` | both reads were provided but only one passed QC | `single_read.fasta` |
-| `FAIL` | a forward or reverse file is missing, neither read passed, or the two reads do not match | no sequence. The reason is in the report |
+If a sample fails any of these, it fails, and the report gives only that reason.
 
-### Outputs (in the output folder)
+### 2. RECall assembly, mixture calling and marks (Woods et al. 2012, Table 1)
+
+- **Trimming and alignment.** Poor-quality read ends are trimmed with Mott's algorithm.
+  Each read is then aligned to the reference (local Smith-Waterman, both strands tried).
+- **Censoring.** Bases below **Q10** are left out of the assembly.
+- **Peak areas.** For every base, the area of the called peak and of the largest
+  secondary ("uncalled") peak are measured from the trace.
+- **Calling each position.** At each reference position:
+  1. Count each nucleotide that is either a called base, or an uncalled base whose area is
+     **≥ 20%** of the called peak's area.
+  2. Keep only nucleotides seen in at least half of the reads.
+  3. If the second most common nucleotide has more than half the count of the most common
+     one, call a **mixture** (IUPAC code). A tie between two bases is therefore also a mixture.
+  4. Otherwise, call the most common base.
+  5. Never call a three-base mixture.
+- **Marks.** A position is **marked** (flagged for review) when:
+  - the uncalled peak is ≥ **17.5%** of the called peak in at least half of the reads, or
+  - the average quality across reads is below **Q20**, or
+  - there is an insertion or a deletion, or
+  - only one read covers it.
+
+### 3. RECall rejection criteria (Woods et al. 2012, Table 2)
+
+A sample **fails** if any of these is true:
+
+| Failure | Rule |
+|---|---|
+| Stop codon | any unambiguous TGA, TAA or TAG, read in the reference frame |
+| Bad insert / bad deletion | an insertion or deletion relative to the reference that is not a multiple of 3 (frameshift) |
+| Too many mixtures | more than 3.5% of bases are mixtures |
+| N count | 5 or more Ns |
+| Mark count | 100 or more marked positions |
+| Single coverage | more than 3 consecutive bases covered by only one read and below Q40 |
+| Low quality | any position where no read gives a usable call |
+
+Every number can be changed. Run `sanger-seq qc --help` to see the options. For a target
+that does not code for a protein, `--non-coding` turns off the stop-codon and frameshift checks.
+
+**The reference** is the region you want to sequence, for example HXB2 PR-RT. Its first base
+is the first base of codon 1; use `--frame` if codon 1 starts elsewhere. The consensus covers
+only that region.
+
+**Differences from RECall.** RECall reruns phred to call bases. This tool uses the base calls
+and quality values already stored in the `.ab1` file, which come from the ABI KB basecaller and
+are on the phred scale. It measures peak areas from the processed traces in the file.
+
+## Outputs (in the output folder)
 
 | File | Contents |
 |---|---|
-| `consensus.fasta` | consensus sequences of the PASS samples |
-| `single_read.fasta` | single-read sequences of the SINGLE samples (marked as such) |
+| `consensus.fasta` | consensus of every PASS sample, oriented to the reference |
+| `report.html` | report to open in a browser: summary table, reasons, an alignment of each consensus against the reference (differences, mixtures, Ns and marked positions highlighted, with details on hover), and a scrollable chromatogram of every read (trace peaks, base calls, quality bars, trimmed ends shaded) |
+| `sample_summary.csv` | one row per sample: status, length, reference span, mixtures, Ns, marks, stop codons, indels, reasons |
+| `read_qc.csv` | one row per read: % bases ≥ Q20, mean QV, trim positions, strand, alignment to reference |
+| `marks.csv` | every marked position and why it was marked |
 | `trimmed_reads.fasta` | every read that passed, after trimming |
-| `sample_summary.csv` | one row per sample: status, length, overlap, mixtures, Ns, reasons |
-| `read_qc.csv` | one row per read: % bases ≥ Q20, mean QV, trim positions, mixtures |
-| `report.html` | report to open in a browser, with a quality plot for each read |
 
 ## Examples: good and bad
 
-`examples/` contains simulated `.ab1` files built from `examples/reference.fasta`, so the
-correct answer for each one is known. To rebuild them, run `python scripts/make_examples.py`.
+`examples/` contains simulated `.ab1` files. A synthetic 1000 bp amplicon is read by a
+forward and a reverse primer. `examples/reference.fasta` is the 561 bp (187-codon)
+protein-coding target inside it. Each sample was built to give one outcome, so the correct
+result is known. To rebuild them, run `python scripts/make_examples.py`.
 
-| Sample | Folder | Forward | Reverse | Result | Why |
-|---|---|---|---|---|---|
-| GOOD01 | good | 96% ≥Q20 | 96% | **PASS** | clean pair. One SNP and one A/G mixture (`R`), and both are called |
-| GOOD02 | good | 95% | 96% | **PASS** | clean pair. One C/T mixture (`Y`) |
-| BORDER01 | good | 79% | 81% | **PASS** | just above the 75% cutoff |
-| BAD01 | bad | 19% | 19% | **FAIL** | failed reaction: weak, noisy signal |
-| BAD02 | bad | 96% | 70% | **SINGLE** | reverse read is just under 75%, so only the forward read is used |
-| BAD03 | bad | 96% | 96% | **FAIL** | both reads are clean but come from different templates (sample mix-up) |
+| Sample | Result | Why |
+|---|---|---|
+| GOOD01 | **PASS** | clean pair. One SNP and one heterozygous position, called as a mixture (`R`) |
+| GOOD02 | **PASS** | one mixture (`Y`), and an in-frame 3 bp deletion that is marked but allowed |
+| BORDER01 | **PASS** | reads at 79% and 81% ≥ Q20, just above the 75% cutoff |
+| BAD01 | FAIL | failed reaction: about 20% of bases ≥ Q20 |
+| BAD02 | FAIL | reverse read at 70%, below the 75% cutoff |
+| BAD03 | FAIL | the reverse read comes from another template (sample mix-up) and does not match the reference |
+| BAD04 | FAIL | stop codon at codon 60 |
+| BAD05 | FAIL | 1 bp deletion (frameshift) |
+| BAD06 | FAIL | 30 mixtures (5.3%, above 3.5%) |
+| BAD07 | FAIL | forward read only. The reverse read is missing |
+| BAD08 | FAIL | both reads pass 75% (79% and 81%), but their weak bases are spread through the target. RECall rejects it: too many marks and positions with no usable call |
 
 ```
-sanger-seq qc examples --reference examples/reference.fasta -o sanger_results
+sanger-seq qc examples -r examples/reference.fasta -o sanger_results
 ```
 
 ## Installing and running
 
 ### Option A: ready-made app (no Python needed)
 
-The builds are made by GitHub Actions. Download `SangerSeqAnalyzer-windows.zip` or
-`SangerSeqAnalyzer-macos.zip` from the **Actions** tab (latest run, then *Artifacts*) or
-from **Releases**. A tag such as `v0.1.0` publishes a release.
+Download `SangerSeqAnalyzer-windows.zip` or `SangerSeqAnalyzer-macos.zip` from
+[Releases](https://github.com/OSAGSoliman/sanger_seq_analyzer/releases).
 
 - **Windows:** unzip, then run `SangerSeqAnalyzer\SangerSeqAnalyzer.exe` to open the window, or
-  `sanger-seq.exe qc <folder>` from a command prompt.
+  `sanger-seq.exe qc <folder> -r reference.fasta` from a command prompt. If SmartScreen warns
+  you, choose *More info*, then *Run anyway*.
 - **macOS:** unzip and open `SangerSeqAnalyzer.app`. The app is not signed, so the first time
   you must right-click it and choose **Open**, or run `xattr -cr SangerSeqAnalyzer.app`.
   The build targets Apple Silicon. On Intel Macs, use option B.
@@ -79,28 +119,14 @@ from **Releases**. A tag such as `v0.1.0` publishes a release.
 
 ```
 pip install git+https://github.com/OSAGSoliman/sanger_seq_analyzer.git
-sanger-seq-gui                      # opens the window
-sanger-seq qc path/to/ab1_folder -o results
+sanger-seq-gui                                        # opens the window
+sanger-seq qc path/to/ab1_folder -r reference.fasta -o results
 ```
 
-### Command-line options
-
-```
-sanger-seq qc INPUTS... [-o OUTDIR]
-  --cutoff 75              % of bases that must be good for a read to pass
-  --min-quality 20         Phred value that counts as a good base
-  --min-length 100         minimum trimmed length
-  --mixture-threshold 20   secondary peak, as % of the main peak, that calls a mixture
-  --no-mixtures            do not call mixtures
-  --reference ref.fasta    turn the consensus to the reference strand and report identity
-  --forward-tags F,FWD,FOR,FORWARD   --reverse-tags R,REV,REVERSE
-  --no-html
-```
-
-**File naming:** the sample name is everything before the last direction tag. For example,
-`HIV01_RT_F_A03.ab1` and `HIV01_RT_R_A04.ab1` both belong to the sample `HIV01_RT`. Tags can
-be separated by `_`, `-`, `.` or a space, and upper/lower case does not matter. Files without
-a tag are listed as unpaired.
+**File naming:** the sample name is everything before the last direction tag (F, FWD, FOR,
+FORWARD / R, REV, REVERSE). For example, `HIV01_RT_F_A03.ab1` and `HIV01_RT_R_A04.ab1` both
+belong to the sample `HIV01_RT`. Tags can be separated by `_`, `-`, `.` or a space. Files
+without a tag are listed in the report as not analysed.
 
 ## Development
 
@@ -109,17 +135,16 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Code layout (`src/sanger_seq_analyzer/`):
-
 | Module | Role |
 |---|---|
 | `abi.py` | reads `.ab1` files (base calls, qualities, peak positions, traces) |
-| `qc.py` | trimming, mixture calling, PASS/FAIL per read |
-| `consensus.py` | forward/reverse alignment, consensus, orientation to a reference |
+| `qc.py` | settings, trimming, peak areas, the lab read cutoff |
+| `recall.py` | alignment to the reference, RECall voting, marks and rejection rules |
 | `pipeline.py` | finds files, pairs them, runs a batch |
-| `report.py` | FASTA, CSV and HTML outputs |
+| `report.py` | FASTA, CSV and HTML (chromatogram viewer and alignment view) |
 | `cli.py` | `sanger-seq` commands. Add new tools here as subcommands |
 | `gui.py` | desktop window (Tkinter, included with Python on Windows and macOS) |
 | `simulate.py` | simulated chromatograms and an ABIF writer, used for the examples and tests |
 
-CI runs the tests on Windows, macOS and Linux, then builds the Windows and macOS apps with PyInstaller.
+CI runs the tests on Windows, macOS and Linux, then builds the Windows and macOS apps with
+PyInstaller. Pushing a `v*` tag publishes a release.

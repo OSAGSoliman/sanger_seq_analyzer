@@ -26,23 +26,31 @@ def revcomp(seq: str) -> str:
     return seq.translate(_COMP)[::-1]
 
 
-def quality_profile(n: int, rng: np.random.Generator, kind: str = "good", good_fraction: float | None = None):
+def quality_profile(n: int, rng: np.random.Generator, kind: str = "good", good_fraction: float | None = None,
+                    weak: str = "ends"):
     """Per-base Phred values shaped like a real run.
 
     ``kind`` is "good" (high plateau, ramp at both ends) or "poor" (weak,
-    noisy signal). ``good_fraction`` forces roughly that share of bases >= Q20.
+    noisy signal). ``good_fraction`` forces that share of bases >= Q20; the
+    weak bases go at both read ends (``weak="ends"``), at the start only
+    (``"start"``) or spread through the whole read (``"scatter"``).
     """
     x = np.arange(n)
     if kind == "good":
         ramp_in = np.clip(x / 25, 0, 1)
-        ramp_out = np.clip((n - x) / 90, 0, 1)
+        ramp_out = np.clip((n - x) / 50, 0, 1)
         q = 8 + 46 * ramp_in * ramp_out + rng.normal(0, 4, n)
     else:
         q = 13 + 6 * np.sin(x / 37) + rng.normal(0, 6, n)
     q = np.clip(np.round(q), 2, 60).astype(int)
     if good_fraction is not None:
         target = int(round(good_fraction * n))
-        order = np.argsort(-q, kind="stable")
+        if weak == "scatter":
+            order = np.argsort(-q, kind="stable")
+        elif weak == "start":
+            order = np.argsort(-x, kind="stable")
+        else:  # both ends, with the shorter weak stretch at the start
+            order = np.argsort(-np.minimum(x * 2.5, n - 1 - x), kind="stable")
         q[order[:target]] = np.maximum(q[order[:target]], 20 + rng.integers(0, 15, target))
         q[order[target:]] = np.minimum(q[order[target:]], rng.integers(4, 20, n - target))
     return q
@@ -125,8 +133,8 @@ def write_ab1(path: str | Path, sample: str, calls: str, quals, peaks, traces: d
     Path(path).write_bytes(header + bytes(data_blob) + bytes(directory))
 
 
-def make_read(path, sample, template, rng, kind="good", good_fraction=None, signal=1000.0):
-    quals = quality_profile(len(template), rng, kind, good_fraction)
+def make_read(path, sample, template, rng, kind="good", good_fraction=None, signal=1000.0, weak="ends"):
+    quals = quality_profile(len(template), rng, kind, good_fraction, weak)
     calls, q, peaks, traces = simulate_read(template, quals, rng, signal)
     write_ab1(path, sample, calls, q, peaks, traces)
     return calls, q

@@ -6,6 +6,7 @@ import pytest
 from sanger_seq_analyzer.simulate import make_read, revcomp
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+STOPS = {"TAA", "TAG", "TGA"}
 
 
 @pytest.fixture(scope="session")
@@ -13,13 +14,25 @@ def examples_dir():
     return EXAMPLES
 
 
+def coding(rng, n_codons):
+    codons = [a + b + c for a in "ACGT" for b in "ACGT" for c in "ACGT" if a + b + c not in STOPS]
+    return "".join(rng.choice(codons, n_codons))
+
+
 @pytest.fixture
 def make_pair(tmp_path):
-    """Write a simulated F/R pair and return (folder, template)."""
-    def _make(sample="S1", f_kw=None, r_kw=None, seed=1, length=700):
+    """Write a simulated F/R pair around a coding target; return (folder, reference, amplicon builder).
+
+    ``edit(target)`` lets a test change the target (e.g. add a stop codon) before reads are made.
+    """
+    def _make(sample="S1", f_kw=None, r_kw=None, seed=1, edit=None):
         rng = np.random.default_rng(seed)
-        template = "".join(rng.choice(list("ACGT"), length))
-        make_read(tmp_path / f"{sample}_F.ab1", sample, template[:500], rng, **(f_kw or {}))
-        make_read(tmp_path / f"{sample}_R.ab1", sample, revcomp(template[200:]), rng, **(r_kw or {}))
-        return tmp_path, template
+        reference = coding(rng, 100)  # 300 bp target
+        flank5 = "".join(rng.choice(list("ACGT"), 150))
+        flank3 = "".join(rng.choice(list("ACGT"), 150))
+        target = edit(reference) if edit else reference
+        amplicon = flank5 + target + flank3
+        make_read(tmp_path / f"{sample}_F.ab1", sample, amplicon[:500], rng, **(f_kw or {}))
+        make_read(tmp_path / f"{sample}_R.ab1", sample, revcomp(amplicon[100:]), rng, **(r_kw or {}))
+        return tmp_path, reference
     return _make

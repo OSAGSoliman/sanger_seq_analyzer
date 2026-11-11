@@ -9,8 +9,8 @@ from pathlib import Path
 from Bio import SeqIO
 
 from .abi import Chromatogram, read_ab1
-from .consensus import ConsensusResult, ReferenceHit, build_consensus, orient_to_reference
 from .qc import QCSettings, ReadQC, qc_read
+from .recall import SampleCall, call_sample
 
 FORWARD_TAGS = ("F", "FWD", "FOR", "FORWARD")
 REVERSE_TAGS = ("R", "REV", "REVERSE")
@@ -22,14 +22,14 @@ class SampleResult:
     sample: str
     forward_chrom: Chromatogram | None
     reverse_chrom: Chromatogram | None
-    consensus: ConsensusResult
-    reference_hit: ReferenceHit | None = None
+    consensus: SampleCall
 
 
 @dataclass
 class RunResult:
     samples: list[SampleResult]
     settings: QCSettings
+    reference: str = ""
     unpaired: list[Path] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
 
@@ -76,16 +76,18 @@ def pair_files(files: list[Path], forward_tags=FORWARD_TAGS, reverse_tags=REVERS
     return dict(sorted(pairs.items())), unpaired
 
 
-def load_reference(path: str | Path | None) -> str | None:
-    if not path:
-        return None
-    return str(next(SeqIO.parse(str(path), "fasta")).seq)
+def load_reference(path: str | Path) -> str:
+    """First sequence of a FASTA file (the region RECall assembles against)."""
+    records = list(SeqIO.parse(str(path), "fasta"))
+    if not records:
+        raise ValueError(f"no FASTA sequence found in {path}")
+    return str(records[0].seq).upper()
 
 
 def run(
     inputs: list[str | Path],
+    reference: str,
     settings: QCSettings | None = None,
-    reference: str | None = None,
     forward_tags=FORWARD_TAGS,
     reverse_tags=REVERSE_TAGS,
     progress=None,
@@ -93,22 +95,23 @@ def run(
     """Analyse every forward/reverse pair found in ``inputs``."""
     settings = settings or QCSettings()
     pairs, unpaired = pair_files(find_ab1_files(inputs), forward_tags, reverse_tags)
-    result = RunResult(samples=[], settings=settings, unpaired=unpaired)
+    result = RunResult(samples=[], settings=settings, reference=reference.upper(), unpaired=unpaired)
 
     for n, (sample, slot) in enumerate(pairs.items(), 1):
         if progress:
             progress(n, len(pairs), sample)
         chroms: dict[str, Chromatogram | None] = {"F": None, "R": None}
-        qcs: dict[str, ReadQC | None] = {"F": None, "R": None}
+        qcs: dict[str, ReadQC | None] = {"F": None, "R": None}  # None = missing or unreadable
         for direction, path in slot.items():
             try:
                 chroms[direction] = read_ab1(path)
                 qcs[direction] = qc_read(chroms[direction], settings)
             except Exception as exc:  # unreadable/corrupt file: report and continue
                 result.errors[str(path)] = f"{type(exc).__name__}: {exc}"
-        cons = build_consensus(sample, qcs["F"], qcs["R"], settings)
-        hit = orient_to_reference(cons.sequence, reference) if reference and cons.sequence else None
-        if hit is not None:
-            cons.sequence = hit.sequence
-        result.samples.append(SampleResult(sample, chroms["F"], chroms["R"], cons, hit))
+        call = call_sample(sample, qcs, reference, settings)
+        for direction, label in (("F", "forward"), ("R", "reverse")):
+            if direction in slot and qcs[direction] is None:
+                call.reasons = [f"{label} read unreadable ({slot[direction].name})" if r == f"{label} read missing"
+                                else r for r in call.reasons]
+        result.samples.append(SampleResult(sample, chroms["F"], chroms["R"], call))
     return result

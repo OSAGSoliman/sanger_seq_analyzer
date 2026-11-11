@@ -48,7 +48,7 @@ jobs:
           pyinstaller --noconfirm --onefile --name sanger-seq packaging/launcher.py
       - name: Smoke test the command-line build
         shell: bash
-        run: ./dist/sanger-seq qc examples -o smoke && test -s smoke/consensus.fasta
+        run: ./dist/sanger-seq qc examples -r examples/reference.fasta -o smoke && test -s smoke/consensus.fasta
       - name: Package
         shell: bash
         run: |

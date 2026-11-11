@@ -1,4 +1,4 @@
-"""Per-read quality control: quality trimming, mixture calling and pass/fail."""
+"""Per-read processing: settings, quality trimming, peak areas and the lab's read cutoff."""
 
 from __future__ import annotations
 
@@ -20,29 +20,56 @@ IUPAC_TO_BASES = {code: bases for bases, code in IUPAC.items()}
 
 @dataclass
 class QCSettings:
-    """Tunable thresholds. Defaults follow the lab's 75% rule."""
+    """All tunable parameters.
 
-    min_quality: int = 20  # Phred value counted as a "good" base (QV20 = 99% accurate)
-    min_good_fraction: float = 0.75  # a read passes if >= 75% of its bases are >= min_quality
+    RECall defaults are from Woods et al. 2012 (J Clin Microbiol 50:1936),
+    Table 1 (mixture calling and marks) and Table 2 (rejection criteria).
+    """
+
+    # --- Lab read-level rules -------------------------------------------------
+    min_quality: int = 20  # Phred value counted as a "good" base
+    min_good_fraction: float = 0.75  # read passes if >= 75% of bases are >= min_quality
     min_trimmed_length: int = 100  # shortest usable read after trimming
-    trim_error_limit: float = 0.05  # Mott's algorithm error limit (as in phred/Geneious)
-    mixture_threshold: float = 0.20  # secondary/primary peak ratio that calls a mixture
+    require_both_directions: bool = True  # a sample needs a forward and a reverse read
+    trim_error_limit: float = 0.05  # Mott's algorithm error limit for end trimming
+
+    # --- RECall Table 1: mixture calling and marks ----------------------------
+    censor_quality: int = 10  # bases below this phred score are excluded from assembly
+    mixture_area: float = 0.20  # uncalled/called peak area that counts towards a mixture
     call_mixtures: bool = True
+    mark_area: float = 0.175  # uncalled/called peak area that marks a position (>= 50% of reads)
+    mark_avg_quality: int = 20  # mark positions whose mean quality across reads is below this
+
+    # --- RECall Table 2: rejection criteria -----------------------------------
+    check_stop_codons: bool = True
+    check_frameshifts: bool = True
+    max_mixture_fraction: float = 0.035  # fail if > 3.5% of bases are mixtures
+    max_n: int = 4  # fail if >= 5 Ns
+    max_marks: int = 99  # fail if >= 100 marked positions
+    single_coverage_quality: int = 40  # single-read bases below this count towards the run
+    max_single_coverage_run: int = 3  # fail if > 3 such consecutive bases
+
+    # --- Reference alignment --------------------------------------------------
+    frame: int = 1  # 1-based reference position of the first base of codon 1
+    min_read_identity: float = 0.80  # a read that matches the reference worse than this is rejected
+    min_read_aligned: int = 50  # ... or aligns over fewer bases than this
 
 
 @dataclass
 class ReadQC:
-    """QC result for one chromatogram."""
+    """One trimmed read, ready for assembly."""
 
     name: str
     length: int
     mean_quality: float
-    good_fraction: float  # fraction of bases with Phred >= min_quality
+    good_fraction: float  # fraction of bases with Phred >= min_quality (whole read)
     trim_start: int  # 0-based, inclusive
     trim_end: int  # 0-based, exclusive
-    sequence: str  # trimmed sequence, with IUPAC mixture codes if enabled
-    qualities: np.ndarray  # qualities of the trimmed sequence
-    mixtures: int
+    sequence: str  # trimmed called bases
+    qualities: np.ndarray  # trimmed qualities
+    uncalled: str  # largest secondary peak's base at each trimmed position ("" if none)
+    area_ratios: np.ndarray  # uncalled/called peak area at each trimmed position
+    mixtures: int  # positions where area ratio >= mixture_area (informational)
     passed: bool
     reasons: list[str] = field(default_factory=list)
 
@@ -58,7 +85,7 @@ class ReadQC:
 def mott_trim(qualities: np.ndarray, error_limit: float = 0.05) -> tuple[int, int]:
     """Return (start, end) of the best-quality region using Mott's algorithm.
 
-    Each base scores ``error_limit - P(error)``; the trimmed region is the
+    Each base scores ``error_limit - P(error)``; the kept region is the
     maximum-sum contiguous segment. Returns (0, 0) if no base qualifies.
     """
     if len(qualities) == 0:
@@ -77,64 +104,60 @@ def mott_trim(qualities: np.ndarray, error_limit: float = 0.05) -> tuple[int, in
     return best
 
 
-def peak_heights(chrom: Chromatogram, window: int = 2) -> np.ndarray | None:
-    """Height of each channel at each base call, shape (n_bases, 4) in ACGT order."""
-    if not chrom.has_traces or len(chrom.peak_locations) != len(chrom):
+def peak_areas(chrom: Chromatogram) -> np.ndarray | None:
+    """Area of each channel under each base call, shape (n_bases, 4) in ACGT order.
+
+    Each base owns the trace between the midpoints to its neighbouring peaks,
+    as phred does when it measures called and uncalled peak areas.
+    """
+    if not chrom.has_traces or len(chrom.peak_locations) != len(chrom) or len(chrom) == 0:
         return None
     n_points = min(len(chrom.traces[b]) for b in BASES)
-    heights = np.zeros((len(chrom), 4))
+    locs = np.clip(chrom.peak_locations.astype(float), 0, n_points - 1)
+    if len(locs) > 1:
+        mids = (locs[:-1] + locs[1:]) / 2
+        first = locs[0] - (mids[0] - locs[0])
+        last = locs[-1] + (locs[-1] - mids[-1])
+        bounds = np.concatenate([[first], mids, [last]])
+    else:
+        bounds = np.array([locs[0] - 6, locs[0] + 6])
+    bounds = np.clip(np.round(bounds), 0, n_points).astype(int)
+    areas = np.zeros((len(chrom), 4))
     for j, base in enumerate(BASES):
-        trace = chrom.traces[base]
-        for i, loc in enumerate(chrom.peak_locations):
-            lo, hi = max(0, loc - window), min(n_points, loc + window + 1)
-            if lo < hi:
-                heights[i, j] = trace[lo:hi].max()
-    return heights
+        cs = np.concatenate([[0.0], np.cumsum(np.clip(chrom.traces[base][:n_points], 0, None))])
+        areas[:, j] = cs[bounds[1:]] - cs[bounds[:-1]]
+    return areas
 
 
-def call_mixtures(chrom: Chromatogram, threshold: float) -> tuple[str, int]:
-    """Re-call bases from the trace, using IUPAC codes for mixed positions.
-
-    A position is mixed when another channel's peak is at least ``threshold``
-    times the height of the called base's peak (as RECall does).
-    """
-    heights = peak_heights(chrom)
-    if heights is None:
-        return chrom.sequence, 0
-    out, n_mixed = [], 0
+def uncalled_peaks(chrom: Chromatogram) -> tuple[str, np.ndarray]:
+    """Largest secondary ("uncalled") peak base and its area relative to the called peak."""
+    n = len(chrom)
+    areas = peak_areas(chrom)
+    if areas is None:
+        return "?" * n, np.zeros(n)
+    uncalled, ratios = [], np.zeros(n)
     for i, called in enumerate(chrom.sequence):
-        row = heights[i]
-        if called not in BASES or row.max() <= 0:
-            out.append(called)
+        if called not in BASES:
+            uncalled.append("?")
             continue
+        row = areas[i]
         primary = row[BASES.index(called)]
-        if primary <= 0:
-            out.append(called)
-            continue
-        present = {called} | {b for j, b in enumerate(BASES) if b != called and row[j] >= threshold * primary}
-        code = IUPAC[frozenset(present)]
-        if code != called:
-            n_mixed += 1
-        out.append(code)
-    return "".join(out), n_mixed
+        others = [(row[j], b) for j, b in enumerate(BASES) if b != called]
+        area, base = max(others)
+        uncalled.append(base)
+        ratios[i] = area / primary if primary > 0 else 0.0
+    return "".join(uncalled), ratios
 
 
 def qc_read(chrom: Chromatogram, settings: QCSettings | None = None) -> ReadQC:
-    """Trim, call mixtures and decide PASS/FAIL for one read."""
+    """Trim a read and apply the lab's read-level cutoff."""
     s = settings or QCSettings()
     q = chrom.qualities
     n = len(chrom)
     good_fraction = float((q >= s.min_quality).mean()) if n else 0.0
     mean_q = float(q.mean()) if n else 0.0
-
     start, end = mott_trim(q, s.trim_error_limit)
-    seq = chrom.sequence
-    n_mixed = 0
-    if s.call_mixtures:
-        seq, _ = call_mixtures(chrom, s.mixture_threshold)
-        n_mixed = sum(1 for c in seq[start:end] if c not in BASES)
-        # Mixtures are only trusted inside the trimmed (high quality) region.
-        seq = chrom.sequence[:start] + seq[start:end] + chrom.sequence[end:]
+    uncalled, ratios = uncalled_peaks(chrom)
 
     reasons = []
     if good_fraction < s.min_good_fraction:
@@ -145,6 +168,7 @@ def qc_read(chrom: Chromatogram, settings: QCSettings | None = None) -> ReadQC:
     if end - start < s.min_trimmed_length:
         reasons.append(f"trimmed length {end - start} < {s.min_trimmed_length}")
 
+    r = ratios[start:end]
     return ReadQC(
         name=chrom.name,
         length=n,
@@ -152,9 +176,11 @@ def qc_read(chrom: Chromatogram, settings: QCSettings | None = None) -> ReadQC:
         good_fraction=good_fraction,
         trim_start=start,
         trim_end=end,
-        sequence=seq[start:end],
+        sequence=chrom.sequence[start:end],
         qualities=q[start:end].copy(),
-        mixtures=n_mixed,
+        uncalled=uncalled[start:end],
+        area_ratios=r.copy(),
+        mixtures=int((r >= s.mixture_area).sum()),
         passed=not reasons,
         reasons=reasons,
     )

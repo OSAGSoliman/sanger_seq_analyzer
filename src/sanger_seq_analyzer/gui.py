@@ -29,7 +29,7 @@ class App(ttk.Frame):
         self.cutoff = tk.DoubleVar(value=d.min_good_fraction * 100)
         self.min_q = tk.IntVar(value=d.min_quality)
         self.min_len = tk.IntVar(value=d.min_trimmed_length)
-        self.mix = tk.DoubleVar(value=d.mixture_threshold * 100)
+        self.mix = tk.DoubleVar(value=d.mixture_area * 100)
         self.call_mix = tk.BooleanVar(value=True)
 
         self.grid(sticky="nsew")
@@ -44,18 +44,20 @@ class App(ttk.Frame):
 
         path_row(0, "AB1 folder", self.input_dir, self.pick_input)
         path_row(1, "Output folder", self.output_dir, self.pick_output)
-        path_row(2, "Reference (optional)", self.reference, self.pick_reference)
+        path_row(2, "Reference FASTA", self.reference, self.pick_reference)
 
         opts = ttk.LabelFrame(self, text="QC settings", padding=8)
         opts.grid(row=3, column=0, columnspan=3, sticky="ew", pady=8)
         for col, (label, var) in enumerate([
             ("Cutoff % good bases", self.cutoff), ("Good base ≥ Q", self.min_q),
-            ("Min trimmed length", self.min_len), ("Mixture %", self.mix),
+            ("Min trimmed length", self.min_len), ("Mixture area %", self.mix),
         ]):
             ttk.Label(opts, text=label).grid(row=0, column=col * 2, sticky="w")
             ttk.Entry(opts, textvariable=var, width=7).grid(row=0, column=col * 2 + 1, padx=(4, 14))
         ttk.Checkbutton(opts, text="Call mixtures", variable=self.call_mix).grid(row=1, column=0, columnspan=3,
                                                                                   sticky="w", pady=(6, 0))
+        ttk.Label(opts, text="Other RECall rules use the published defaults (see README / command line).",
+                  foreground="#666").grid(row=1, column=3, columnspan=5, sticky="w", pady=(6, 0))
 
         buttons = ttk.Frame(self)
         buttons.grid(row=4, column=0, columnspan=3, sticky="ew")
@@ -66,7 +68,7 @@ class App(ttk.Frame):
         self.progress = ttk.Progressbar(buttons, mode="determinate")
         self.progress.pack(side="left", fill="x", expand=True, padx=6)
 
-        cols = ("status", "length", "forward", "reverse", "notes")
+        cols = ("status", "length", "mixtures", "marks", "notes")
         self.table = ttk.Treeview(self, columns=cols, show="tree headings", height=12)
         self.table.heading("#0", text="Sample")
         for c, w in zip(cols, (70, 70, 70, 70, 420)):
@@ -75,7 +77,6 @@ class App(ttk.Frame):
         self.table.grid(row=5, column=0, columnspan=3, sticky="nsew", pady=8)
         self.rowconfigure(5, weight=1)
         self.table.tag_configure("PASS", foreground="#1b5e20")
-        self.table.tag_configure("SINGLE", foreground="#e65100")
         self.table.tag_configure("FAIL", foreground="#b71c1c")
 
         self.status = ttk.Label(self, text="Choose a folder of .ab1 files.")
@@ -103,12 +104,15 @@ class App(ttk.Frame):
         if not self.input_dir.get() or not Path(self.input_dir.get()).is_dir():
             messagebox.showerror("Sanger QC", "Choose a folder containing .ab1 files.")
             return
+        if not self.reference.get() or not Path(self.reference.get()).is_file():
+            messagebox.showerror("Sanger QC", "Choose the reference FASTA to assemble against.")
+            return
         try:
             settings = QCSettings(
                 min_quality=int(self.min_q.get()),
                 min_good_fraction=float(self.cutoff.get()) / 100,
                 min_trimmed_length=int(self.min_len.get()),
-                mixture_threshold=float(self.mix.get()) / 100,
+                mixture_area=float(self.mix.get()) / 100,
                 call_mixtures=bool(self.call_mix.get()),
             )
         except (tk.TclError, ValueError):
@@ -124,8 +128,8 @@ class App(ttk.Frame):
 
     def _work(self, settings, out):
         try:
-            ref = load_reference(self.reference.get()) if self.reference.get() else None
-            result = run([self.input_dir.get()], settings, reference=ref,
+            ref = load_reference(self.reference.get())
+            result = run([self.input_dir.get()], ref, settings,
                          progress=lambda n, t, name: self.events.put(("progress", n, t, name)))
             paths = write_outputs(result, out)
             self.events.put(("done", result, paths))
@@ -157,8 +161,7 @@ class App(ttk.Frame):
         for s in result.samples:
             c = s.consensus
             self.table.insert("", "end", text=s.sample, tags=(c.status,), values=(
-                c.status, c.length, c.forward.status if c.forward else "-",
-                c.reverse.status if c.reverse else "-", "; ".join(c.reasons)))
+                c.status, c.length, c.mixtures, c.marks, "; ".join(c.reasons)))
         if not result.samples:
             self.status.configure(text="No forward/reverse .ab1 pairs found (names need _F / _R tags).")
             return
