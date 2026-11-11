@@ -33,6 +33,35 @@ def qapp():
     release_gc()
 
 
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch):
+    """Fail instead of hanging: a modal dialog in a headless test waits forever for a click.
+
+    Unexpected dialogs answer No/Cancel and fail the test at teardown. Tests that expect a
+    dialog patch it themselves (their monkeypatch.setattr runs after this one).
+    """
+    from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+
+    opened = []
+
+    def record(kind, result):
+        def fake(*args, **kwargs):
+            opened.append((kind, [a for a in args if isinstance(a, str)][:1]))
+            return result
+        return fake
+
+    no = QMessageBox.StandardButton.No
+    for name in ("question", "warning", "critical", "information"):
+        monkeypatch.setattr(QMessageBox, name, record(f"QMessageBox.{name}", no))
+    monkeypatch.setattr(QMessageBox, "about", record("QMessageBox.about", None))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", record("QFileDialog.getExistingDirectory", ""))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", record("QFileDialog.getOpenFileName", ("", "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", record("QFileDialog.getOpenFileNames", ([], "")))
+    monkeypatch.setattr(QDialog, "exec", record("QDialog.exec", 0))
+    yield
+    assert not opened, f"unexpected modal dialog(s) in a headless test: {opened}"
+
+
 @pytest.fixture
 def window(qapp, tmp_path):
     w = make_window(tmp_path / "settings.ini")

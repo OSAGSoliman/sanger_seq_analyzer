@@ -24,4 +24,6 @@ sanger-seq-gui = "sanger_seq_analyzer.gui:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
+# Print every thread's stack if a test runs this long (finds hangs on CI machines).
+faulthandler_timeout = 300
 testpaths = ["tests"]
