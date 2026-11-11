@@ -50,3 +50,22 @@ def test_cli(examples_dir, tmp_path):
     from sanger_seq_analyzer.cli import main
     assert main(["qc", str(examples_dir / "good"), "-o", str(tmp_path), "--no-html"]) == 0
     assert (tmp_path / "consensus.fasta").read_text().count(">") == 3
+
+
+def test_missing_reverse_fails(make_pair):
+    folder, _ = make_pair()
+    (folder / "S1_R.ab1").unlink()
+    c = run([folder]).samples[0].consensus
+    assert c.forward.passed  # the forward read itself is fine...
+    assert c.status == "FAIL" and c.sequence == ""  # ...but one direction is not enough
+    assert "reverse read missing" in c.reasons
+
+
+def test_missing_forward_fails(make_pair, tmp_path):
+    folder, _ = make_pair()
+    (folder / "S1_F.ab1").unlink()
+    res = run([folder])
+    c = res.samples[0].consensus
+    assert c.status == "FAIL" and "forward read missing" in c.reasons
+    paths = write_outputs(res, tmp_path / "out")
+    assert paths["consensus"].read_text() == "" and paths["single"].read_text() == ""

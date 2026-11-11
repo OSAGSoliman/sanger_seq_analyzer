@@ -100,7 +100,8 @@ def build_consensus(
         elif not read.passed:
             reasons.append(f"{label} read failed QC: " + "; ".join(read.reasons))
 
-    if use_f is None and use_r is None:
+    # Both directions are required: a sample sequenced one way only always fails.
+    if forward is None or reverse is None or (use_f is None and use_r is None):
         return ConsensusResult(name, "", "FAIL", forward, reverse, reasons=reasons)
 
     if use_f is None or use_r is None:

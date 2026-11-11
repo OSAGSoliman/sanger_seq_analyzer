@@ -29,8 +29,8 @@ For every sample with a forward (`_F`) and reverse (`_R`) read:
 | Sample status | Meaning | Written to |
 |---|---|---|
 | `PASS` | both reads passed and they agree | `consensus.fasta` |
-| `SINGLE` | only one read passed | `single_read.fasta` |
-| `FAIL` | neither read passed, or the two reads do not match | no sequence. The reason is in the report |
+| `SINGLE` | both reads were provided but only one passed QC | `single_read.fasta` |
+| `FAIL` | a forward or reverse file is missing, neither read passed, or the two reads do not match | no sequence. The reason is in the report |
 
 ### Outputs (in the output folder)
 
