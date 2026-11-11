@@ -16,6 +16,7 @@ from ..theme.fonts import caps_font
 from ..theme.icons import icon
 
 _themed: weakref.WeakSet = weakref.WeakSet()
+_following_theme = False
 
 
 def repolish(widget: QWidget) -> None:
@@ -66,6 +67,10 @@ def divider(vertical: bool = False) -> QFrame:
 
 def themed_icon(button: QAbstractButton | QAction, name: str, token: str = "text.primary", size: int = 16) -> None:
     """Give a button an icon in a theme colour that follows theme changes."""
+    global _following_theme
+    if not _following_theme:  # connect on first use, never at import time (before the QApplication exists)
+        manager().changed.connect(_refresh_icons)
+        _following_theme = True
     button._icon_spec = (name, token, size)
     _themed.add(button)
     _apply_icon(button)
@@ -86,8 +91,6 @@ def _refresh_icons(_theme) -> None:
         except RuntimeError:  # deleted on the C++ side
             pass
 
-
-manager().changed.connect(_refresh_icons)
 
 
 def button(text: str = "", variant: str = "secondary", *, icon_name: str | None = None, size: str | None = None,

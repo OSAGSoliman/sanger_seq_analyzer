@@ -25,6 +25,8 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="sanger-seq-gui", add_help=True)
     p.add_argument("--self-test", metavar="OUTDIR", help="run the bundled examples headless and exit 0/1")
     p.add_argument("--theme", choices=("system", "light", "dark"), help="colour scheme for this session")
+    p.add_argument("--quit-after", type=float, metavar="SECONDS",
+                   help="open the window on the native platform and quit after SECONDS (launch check in CI)")
     return p.parse_args(argv)
 
 
@@ -166,6 +168,9 @@ def run_app(argv: list[str] | None = None) -> int:
         manager().set_mode(store.get_str("ui/theme", "system"))
     window = MainWindow(store)
     window.show()
+    if args.quit_after is not None:
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(int(args.quit_after * 1000), app.quit)
     return app.exec()
 
 

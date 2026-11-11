@@ -76,9 +76,20 @@ jobs:
         run: |
           ./dist/sanger-seq qc examples -r measles-n450 -o smoke
           test "$(grep -c '^>' smoke/consensus.fasta)" = "3"
+      - name: Launch the desktop app on the native platform (macOS)
+        # The self-test below runs offscreen; this opens the real Cocoa window, where v0.3.0
+        # crashed at launch (theme restyled from a colour-scheme signal during QApplication setup).
+        if: runner.os == 'macOS'
+        run: ./dist/SangerSeqAnalyzer.app/Contents/MacOS/SangerSeqAnalyzer --quit-after 8
       - name: Self-test the desktop app (macOS)
         if: runner.os == 'macOS'
         run: ./dist/SangerSeqAnalyzer.app/Contents/MacOS/SangerSeqAnalyzer --self-test st
+      - name: Launch the desktop app on the native platform (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\SangerSeqAnalyzer\SangerSeqAnalyzer.exe -ArgumentList '--quit-after','8' -Wait -PassThru
+          if ($p.ExitCode) { Write-Error "app exited with $($p.ExitCode)"; exit 1 }
       - name: Self-test the desktop app (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
