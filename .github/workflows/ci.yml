@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.9", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: sanger-seq qc examples --reference examples/reference.fasta -o sanger_results
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ".[build]"
+      - name: Build desktop app (window) and command-line tool
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --windowed --name SangerSeqAnalyzer packaging/launcher.py
+          pyinstaller --noconfirm --onefile --name sanger-seq packaging/launcher.py
+      - name: Smoke test the command-line build
+        shell: bash
+        run: ./dist/sanger-seq qc examples -o smoke && test -s smoke/consensus.fasta
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p release
+          cp -R examples release/examples
+          cp README.md release/
+          if [ "${{ matrix.name }}" = "macos" ]; then
+            cp -R dist/SangerSeqAnalyzer.app release/
+          else
+            cp -R dist/SangerSeqAnalyzer release/SangerSeqAnalyzer
+          fi
+          cp dist/sanger-seq* release/
+          cd release && 7z a ../SangerSeqAnalyzer-${{ matrix.name }}.zip . > /dev/null || zip -qry ../SangerSeqAnalyzer-${{ matrix.name }}.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SangerSeqAnalyzer-${{ matrix.name }}
+          path: SangerSeqAnalyzer-${{ matrix.name }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: SangerSeqAnalyzer-*.zip

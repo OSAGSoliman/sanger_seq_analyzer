@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sanger_seq_analyzer"
+version = "0.1.0"
+description = "Sanger sequencing analysis: .ab1 QC, trimming, mixture calling and forward/reverse consensus FASTA"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["biopython>=1.80", "numpy>=1.22", "matplotlib>=3.5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+build = ["pyinstaller>=6"]
+
+[project.scripts]
+sanger-seq = "sanger_seq_analyzer.cli:main"
+
+[project.gui-scripts]
+sanger-seq-gui = "sanger_seq_analyzer.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
