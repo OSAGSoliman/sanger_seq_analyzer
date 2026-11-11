@@ -7,7 +7,7 @@ name = "sanger_seq_analyzer"
 version = "0.3.0"
 description = "Sanger sequencing analysis: .ab1 QC, trimming, mixture calling and forward/reverse consensus FASTA"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = ["biopython>=1.80", "numpy>=1.22", "PySide6-Essentials>=6.6"]
 
 [project.optional-dependencies]

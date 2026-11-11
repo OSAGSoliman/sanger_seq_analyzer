@@ -204,7 +204,10 @@ desktop app, the separate command-line tool `sanger-seq`, the examples and this 
   The build targets Apple Silicon and needs the macOS version required by Qt 6.12. On Intel
   Macs, use option B.
 
-### Option B: with Python (3.10 or newer, from python.org)
+### Option B: with Python (3.12 or newer, from python.org)
+
+Python 3.12 or newer is required: on Python 3.10 and 3.11, PySide6 6.12 releases Python's `None`
+one time too many on many Qt calls, and the app crashes after a few thousand screen updates.
 
 ```
 pip install git+https://github.com/OSAGSoliman/sanger_seq_analyzer.git
@@ -246,7 +249,7 @@ python packaging/build.py                # PyInstaller builds in dist/ (needs ".
 | `gui/` | desktop window (PySide6). `gui/tools.py` registers tools; `gui/qc/` is the QC tool |
 | `simulate.py` | simulated chromatograms and an ABIF writer, used for the examples and tests |
 
-CI runs the tests on Windows, macOS and Linux (Python 3.10 and 3.12), checks that the command
+CI runs the tests on Windows, macOS and Linux (Python 3.12 and 3.13), checks that the command
 line works without Qt, then builds the Windows and macOS apps with PyInstaller and runs the
 packaged command line and the app's `--self-test` before uploading them. Pushing a `v*` tag
 publishes a release.

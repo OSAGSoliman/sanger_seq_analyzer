@@ -1,7 +1,9 @@
 """The redesigned report.html (design spec section 4; FR HR-1, HR-2)."""
 
+import html
 import re
 import shutil
+import sys
 from html.parser import HTMLParser
 
 import pytest
@@ -75,7 +77,12 @@ def test_size_and_links(examples_run, tmp_path):
 
 
 def test_names_are_escaped(tmp_path):
-    shutil.copy(EXAMPLES / "good/GOOD01_F.ab1", tmp_path / "A<b>&'x_F.ab1")
-    shutil.copy(EXAMPLES / "good/GOOD01_R.ab1", tmp_path / "A<b>&'x_R.ab1")
+    # Windows does not allow < and > in file names; & and ' still need escaping there.
+    name = "A&'x" if sys.platform == "win32" else "A<b>&'x"
+    shutil.copy(EXAMPLES / "good/GOOD01_F.ab1", tmp_path / f"{name}_F.ab1")
+    shutil.copy(EXAMPLES / "good/GOOD01_R.ab1", tmp_path / f"{name}_R.ab1")
     page = render_html(run([tmp_path], REF))
-    assert "A<b>" not in page and "A&lt;b&gt;&amp;&#x27;x" in page
+    assert html.escape(name) in page
+    assert f">{name}<" not in page and f'"{name}"' not in page
+    if "<" in name:
+        assert "A<b>" not in page

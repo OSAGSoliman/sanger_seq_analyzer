@@ -68,7 +68,7 @@ def test_missing_forward_fails(make_pair, tmp_path):
     c = res.samples[0].consensus
     assert c.status == "FAIL" and c.reasons == ["forward read missing"]
     paths = write_outputs(res, tmp_path / "out")
-    assert paths["consensus"].read_text() == ""
+    assert paths["consensus"].read_text(encoding="utf-8") == ""
 
 
 EXPECTED = {
@@ -93,9 +93,9 @@ def test_examples_give_expected_result(examples_dir, tmp_path):
     assert any("3 bp deletion" in i for i in got["GOOD02"].indels)
 
     paths = write_outputs(res, tmp_path)
-    fasta = paths["consensus"].read_text()
+    fasta = paths["consensus"].read_text(encoding="utf-8")
     assert fasta.count(">") == 3 and ">BAD" not in fasta
-    page = paths["html"].read_text()
+    page = paths["html"].read_text(encoding="utf-8")
     assert '<canvas data-v=' in page and 'class="aln"' in page
 
 
@@ -104,7 +104,7 @@ def test_cli(examples_dir, tmp_path):
     rc = main(["qc", str(examples_dir / "good"), "-r", "measles-n450",
                "-o", str(tmp_path), "--no-html"])
     assert rc == 0
-    assert (tmp_path / "consensus.fasta").read_text().count(">") == 3
+    assert (tmp_path / "consensus.fasta").read_text(encoding="utf-8").count(">") == 3
 
 
 def test_builtin_measles_n450():

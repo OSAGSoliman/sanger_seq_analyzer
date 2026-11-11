@@ -1,5 +1,5 @@
 # Exact versions for the release builds (python -m pip install -c packaging/constraints.txt ".[build]").
-# PySide6 6.12 needs Python >= 3.10; its macOS wheel sets the minimum macOS of the app bundle.
+# Python >= 3.12 (PySide6 6.12 mis-counts references to None on 3.10/3.11 and crashes); its macOS wheel sets the minimum macOS of the app bundle.
 PySide6-Essentials==6.12.0
 shiboken6==6.12.0
 pyinstaller==6.22.3

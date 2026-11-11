@@ -62,8 +62,12 @@ def image_varies(widget, size=None) -> bool:
     QTest.qWait(1)
     image = widget.grab().toImage()
     if size is not None:
+        # The grab covers the widget's actual size, which can exceed the request when its
+        # minimum size is larger (e.g. wider system fonts on Windows).
         dpr = image.devicePixelRatio()
-        assert (image.width(), image.height()) == (round(size[0] * dpr), round(size[1] * dpr))
+        actual = widget.size()
+        assert actual.width() >= size[0] and actual.height() >= size[1]
+        assert (image.width(), image.height()) == (round(actual.width() * dpr), round(actual.height() * dpr))
     first = image.pixel(0, 0)
     step = max(1, image.width() // 97)
     return any(image.pixel(x, y) != first for x in range(0, image.width(), step)
