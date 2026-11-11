@@ -53,6 +53,8 @@ class QCSettings:
     frame: int = 1  # 1-based reference position of the first base of codon 1
     min_read_identity: float = 0.80  # a read that matches the reference worse than this is rejected
     min_read_aligned: int = 50  # ... or aligns over fewer bases than this
+    require_full_reference: bool = True  # every reference position needs both reads (one if directions optional)
+    check_read_orientation: bool = True  # forward must align to +, reverse to -
 
 
 @dataclass
@@ -124,7 +126,8 @@ def peak_areas(chrom: Chromatogram) -> np.ndarray | None:
     bounds = np.clip(np.round(bounds), 0, n_points).astype(int)
     areas = np.zeros((len(chrom), 4))
     for j, base in enumerate(BASES):
-        cs = np.concatenate([[0.0], np.cumsum(np.clip(chrom.traces[base][:n_points], 0, None))])
+        signal = np.clip(chrom.traces[base][:n_points].astype(np.float64), 0, None)
+        cs = np.concatenate([[0.0], np.cumsum(signal)])
         areas[:, j] = cs[bounds[1:]] - cs[bounds[:-1]]
     return areas
 
@@ -160,12 +163,14 @@ def qc_read(chrom: Chromatogram, settings: QCSettings | None = None) -> ReadQC:
     uncalled, ratios = uncalled_peaks(chrom)
 
     reasons = []
-    if good_fraction < s.min_good_fraction:
+    if not chrom.has_qualities:
+        reasons.append("file has no quality values")
+    elif good_fraction < s.min_good_fraction:
         reasons.append(
             f"only {good_fraction:.1%} of bases are >= Q{s.min_quality} "
             f"(cutoff {s.min_good_fraction:.0%})"
         )
-    if end - start < s.min_trimmed_length:
+    if chrom.has_qualities and end - start < s.min_trimmed_length:
         reasons.append(f"trimmed length {end - start} < {s.min_trimmed_length}")
 
     r = ratios[start:end]

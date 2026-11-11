@@ -25,7 +25,8 @@ class Chromatogram:
     sequence: str
     qualities: np.ndarray  # Phred quality per base call (int)
     peak_locations: np.ndarray  # trace index of each base call (int)
-    traces: dict[str, np.ndarray] = field(default_factory=dict)  # base -> signal
+    traces: dict[str, np.ndarray] = field(default_factory=dict)  # base -> signal (int32, lossless)
+    has_qualities: bool = True  # False when the file stores no Phred values (all reported as 0)
 
     def __len__(self) -> int:
         return len(self.sequence)
@@ -43,7 +44,8 @@ def read_ab1(path: str | Path) -> Chromatogram:
 
     sequence = str(record.seq).upper()
     quals = record.letter_annotations.get("phred_quality")
-    if quals is None or len(quals) != len(sequence):
+    has_qualities = quals is not None and len(quals) == len(sequence) and len(sequence) > 0
+    if not has_qualities:
         quals = [0] * len(sequence)
     qualities = np.asarray(quals, dtype=int)
 
@@ -58,7 +60,7 @@ def read_ab1(path: str | Path) -> Chromatogram:
     for i, base in enumerate(order.upper()[:4]):
         data = raw.get(f"DATA{9 + i}")
         if data is not None:
-            traces[base] = np.asarray(data, dtype=float)
+            traces[base] = np.asarray(data, dtype=np.int32)
 
     if len(peak_locations) != len(sequence):
         peak_locations = np.asarray([], dtype=int)
@@ -70,6 +72,7 @@ def read_ab1(path: str | Path) -> Chromatogram:
         qualities=qualities,
         peak_locations=peak_locations,
         traces=traces,
+        has_qualities=has_qualities,
     )
 
 

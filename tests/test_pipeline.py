@@ -96,7 +96,7 @@ def test_examples_give_expected_result(examples_dir, tmp_path):
     fasta = paths["consensus"].read_text()
     assert fasta.count(">") == 3 and ">BAD" not in fasta
     page = paths["html"].read_text()
-    assert "canvas data-viewer" in page and "class='aln'" in page
+    assert '<canvas data-v=' in page and 'class="aln"' in page
 
 
 def test_cli(examples_dir, tmp_path):

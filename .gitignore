@@ -9,3 +9,4 @@ dist/
 sanger_results/
 *.spec.bak
 .DS_Store
+/*.spec

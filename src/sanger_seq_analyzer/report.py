@@ -1,17 +1,53 @@
-"""Write FASTA, CSV and HTML outputs for a run."""
+"""Write FASTA, CSV, JSON and HTML outputs for a run.
+
+Every file is written to ``<name>.part`` and then renamed, so an interrupted or
+failed export never leaves a file that looks complete. CSV files are UTF-8 with
+a byte-order mark (so Excel on Windows shows non-ASCII names correctly); FASTA,
+JSON and HTML are plain UTF-8.
+"""
 
 from __future__ import annotations
 
 import csv
-import html
+import dataclasses
 import json
-from datetime import datetime
+import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, TextIO
 
-from . import __version__
-from .pipeline import RunResult, SampleResult
-from .qc import ReadQC
-from .recall import GAP, SampleCall
+from .pipeline import RunResult
+from .report_html import render_html
+
+
+@dataclass(frozen=True)
+class ExportFile:
+    key: str
+    filename: str
+    description: str
+
+
+EXPORT_FILES = (
+    ExportFile("consensus", "consensus.fasta", "Consensus of every PASS sample, oriented to the reference"),
+    ExportFile("html", "report.html", "Summary, alignments and chromatograms; opens in a browser and prints to PDF"),
+    ExportFile("samples_csv", "sample_summary.csv",
+               "One row per sample: status, length, span, mixtures, N, marks, indels, reasons"),
+    ExportFile("reads_csv", "read_qc.csv", "One row per read: % bases ≥ Q20, mean QV, trim range, strand, identity"),
+    ExportFile("marks_csv", "marks.csv", "Every marked position and why it was marked"),
+    ExportFile("reads", "trimmed_reads.fasta", "Every read that passed the lab cutoff, after trimming"),
+    ExportFile("run_info", "run_info.json", "Version, date, reference checksum, input files and every setting used"),
+)
+EXPORT_BY_KEY = {f.key: f for f in EXPORT_FILES}
+
+
+class ExportError(Exception):
+    """A file could not be written; names the file and the cause."""
+
+    def __init__(self, path: Path, cause: Exception):
+        self.path = Path(path)
+        self.cause = cause
+        detail = cause.strerror if isinstance(cause, OSError) and cause.strerror else str(cause)
+        super().__init__(f"could not write {self.path}: {detail}")
 
 
 def _wrap(seq: str, width: int = 70) -> str:
@@ -22,260 +58,165 @@ def _fasta(header: str, seq: str) -> str:
     return f">{header}\n{_wrap(seq)}\n"
 
 
-def write_outputs(result: RunResult, outdir: str | Path, html_report: bool = True) -> dict[str, Path]:
-    out = Path(outdir)
-    out.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "consensus": out / "consensus.fasta",
-        "reads": out / "trimmed_reads.fasta",
-        "samples_csv": out / "sample_summary.csv",
-        "reads_csv": out / "read_qc.csv",
-        "marks_csv": out / "marks.csv",
+def _passed_reads(result: RunResult):
+    for s in result.samples:
+        c = s.consensus
+        for direction, read in (("F", c.forward), ("R", c.reverse)):
+            if read is not None and read.passed:
+                yield direction, read
+
+
+def write_consensus(result: RunResult, fh: TextIO) -> None:
+    for s in result.samples:
+        c = s.consensus
+        if c.status == "PASS":
+            fh.write(_fasta(f"{s.sample} ref={c.ref_start}-{c.ref_end} len={c.length} "
+                            f"mixtures={c.mixtures} marks={c.marks}", c.sequence))
+
+
+def write_trimmed_reads(result: RunResult, fh: TextIO) -> None:
+    for direction, read in _passed_reads(result):
+        fh.write(_fasta(f"{read.name} {direction} trimmed={read.trim_start + 1}-{read.trim_end}", read.sequence))
+
+
+def write_sample_summary(result: RunResult, fh: TextIO) -> None:
+    w = csv.writer(fh)
+    w.writerow(["sample", "status", "length", "ref_start", "ref_end", "mixtures", "mixture_pct", "N",
+                "marks", "max_single_coverage_run", "stop_codons", "indels",
+                "forward_status", "reverse_status", "reasons"])
+    for s in result.samples:
+        c = s.consensus
+        w.writerow([s.sample, c.status, c.length, c.ref_start or "", c.ref_end or "", c.mixtures,
+                    f"{c.mixture_fraction * 100:.2f}", c.n_count, c.marks, c.max_single_run,
+                    " ".join(map(str, c.stop_codons)), "; ".join(c.indels),
+                    c.forward.status if c.forward else "MISSING",
+                    c.reverse.status if c.reverse else "MISSING", "; ".join(c.reasons)])
+
+
+def write_read_qc(result: RunResult, fh: TextIO) -> None:
+    w = csv.writer(fh)
+    w.writerow(["sample", "direction", "file", "status", "raw_length", "mean_quality",
+                f"pct_bases_q{result.settings.min_quality}", "trim_start", "trim_end",
+                "trimmed_length", "strand", "ref_start", "ref_end", "ref_identity", "reasons"])
+    for s in result.samples:
+        aligned = {a.direction: a for a in s.consensus.aligned}
+        for direction, read, chrom in (("F", s.consensus.forward, s.forward_chrom),
+                                       ("R", s.consensus.reverse, s.reverse_chrom)):
+            if read is None:
+                continue
+            a = aligned.get(direction)
+            w.writerow([s.sample, direction, chrom.path.name if chrom else "", read.status, read.length,
+                        f"{read.mean_quality:.1f}", f"{read.good_fraction * 100:.1f}",
+                        read.trim_start + 1, read.trim_end, read.trimmed_length,
+                        a.strand if a else "", a.ref_start + 1 if a else "", a.ref_end if a else "",
+                        f"{a.identity:.4f}" if a else "", "; ".join(read.reasons)])
+
+
+def write_marks(result: RunResult, fh: TextIO) -> None:
+    w = csv.writer(fh)
+    w.writerow(["sample", "consensus_position", "reference_position", "base", "coverage",
+                "mean_quality", "marks"])
+    for s in result.samples:
+        for p in s.consensus.positions:
+            if p.marks:
+                w.writerow([s.sample, p.cons_index or "", p.ref_number if p.ref_pos is not None else "insertion",
+                            p.base, p.coverage, f"{p.mean_quality:.1f}", "; ".join(p.marks)])
+
+
+def run_info(result: RunResult) -> dict:
+    """Everything needed to trace a result back to its inputs, reference and settings."""
+    ref = result.reference_info
+    return {
+        "app": "sanger_seq_analyzer",
+        "version": result.version,
+        "rule_set": "Lab read rules + RECall (Woods et al. 2012, J Clin Microbiol 50:1936, Tables 1 and 2)",
+        "started": result.started.isoformat(timespec="seconds") if result.started else None,
+        "finished": result.finished.isoformat(timespec="seconds") if result.finished else None,
+        "cancelled": result.cancelled,
+        "reference": {
+            "name": ref.name if ref else "",
+            "description": ref.description if ref else "",
+            "source": ref.source if ref else "",
+            "path": str(ref.path) if ref and ref.path else None,
+            "record_id": ref.record_id if ref else None,
+            "length": len(result.reference),
+            "sha256": ref.sha256 if ref else "",
+            "warnings": list(ref.warnings) if ref else [],
+        },
+        "inputs": [str(p) for p in result.inputs],
+        "forward_tags": list(result.forward_tags),
+        "reverse_tags": list(result.reverse_tags),
+        "settings": dataclasses.asdict(result.settings),
+        "counts": {"samples": len(result.samples), "pass": result.count("PASS"), "fail": result.count("FAIL")},
+        "planned_samples": result.planned,
+        "files_not_analysed": [{"path": str(s.path), "reason": s.reason, "detail": s.text} for s in result.skipped],
+        "errors": dict(result.errors),
     }
 
-    with open(paths["consensus"], "w", newline="\n") as cons_fh, \
-         open(paths["reads"], "w", newline="\n") as reads_fh:
-        for s in result.samples:
-            c = s.consensus
-            if c.status == "PASS":
-                cons_fh.write(_fasta(f"{s.sample} ref={c.ref_start}-{c.ref_end} len={c.length} "
-                                     f"mixtures={c.mixtures} marks={c.marks}", c.sequence))
-            for direction, read in (("F", c.forward), ("R", c.reverse)):
-                if read is not None and read.passed:
-                    reads_fh.write(_fasta(f"{read.name} {direction} trimmed={read.trim_start + 1}-{read.trim_end}",
-                                          read.sequence))
 
-    with open(paths["samples_csv"], "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["sample", "status", "length", "ref_start", "ref_end", "mixtures", "mixture_pct", "N",
-                    "marks", "max_single_coverage_run", "stop_codons", "indels",
-                    "forward_status", "reverse_status", "reasons"])
-        for s in result.samples:
-            c = s.consensus
-            w.writerow([s.sample, c.status, c.length, c.ref_start or "", c.ref_end or "", c.mixtures,
-                        f"{c.mixture_fraction * 100:.2f}", c.n_count, c.marks, c.max_single_run,
-                        " ".join(map(str, c.stop_codons)), "; ".join(c.indels),
-                        c.forward.status if c.forward else "MISSING",
-                        c.reverse.status if c.reverse else "MISSING", "; ".join(c.reasons)])
-
-    with open(paths["reads_csv"], "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["sample", "direction", "file", "status", "raw_length", "mean_quality",
-                    f"pct_bases_q{result.settings.min_quality}", "trim_start", "trim_end",
-                    "trimmed_length", "strand", "ref_start", "ref_end", "ref_identity", "reasons"])
-        for s in result.samples:
-            aligned = {a.direction: a for a in s.consensus.aligned}
-            for direction, read, chrom in (("F", s.consensus.forward, s.forward_chrom),
-                                           ("R", s.consensus.reverse, s.reverse_chrom)):
-                if read is None:
-                    continue
-                a = aligned.get(direction)
-                w.writerow([s.sample, direction, chrom.path.name if chrom else "", read.status, read.length,
-                            f"{read.mean_quality:.1f}", f"{read.good_fraction * 100:.1f}",
-                            read.trim_start + 1, read.trim_end, read.trimmed_length,
-                            a.strand if a else "", a.ref_start + 1 if a else "", a.ref_end if a else "",
-                            f"{a.identity:.4f}" if a else "", "; ".join(read.reasons)])
-
-    with open(paths["marks_csv"], "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["sample", "consensus_position", "reference_position", "base", "coverage",
-                    "mean_quality", "marks"])
-        for s in result.samples:
-            i = 0
-            for p in s.consensus.positions:
-                if p.base != "-":
-                    i += 1
-                if p.marks:
-                    w.writerow([s.sample, i if p.base != "-" else "", p.ref_pos + 1 if p.ref_pos is not None
-                                else "insertion", p.base, p.coverage, f"{p.mean_quality:.1f}", "; ".join(p.marks)])
-
-    if html_report:
-        paths["html"] = out / "report.html"
-        paths["html"].write_text(render_html(result), encoding="utf-8")
-    return paths
+def write_run_info(result: RunResult, fh: TextIO) -> None:
+    json.dump(run_info(result), fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
 
 
-def _read_data(read: ReadQC, chrom) -> dict:
-    """Compact trace data for the in-page chromatogram viewer."""
-    data = {"calls": chrom.sequence, "quals": [int(q) for q in chrom.qualities],
-            "trim": [read.trim_start, read.trim_end], "traces": {}, "peaks": []}
-    if chrom.has_traces and len(chrom.peak_locations) == len(chrom) and len(chrom) > 1:
-        spacing = float(max(1, (chrom.peak_locations[-1] - chrom.peak_locations[0]) / (len(chrom) - 1)))
-        step = max(1, int(round(spacing / 6)))  # keep ~6 points per base
-        for b in "ACGT":
-            data["traces"][b] = [int(v) for v in chrom.traces[b][::step]]
-        data["peaks"] = [round(float(p) / step, 1) for p in chrom.peak_locations]
-    return data
+def write_html(result: RunResult, fh: TextIO) -> None:
+    fh.write(render_html(result))
 
 
-def _read_block(direction: str, read: ReadQC | None, chrom, min_q: int, viewers: dict) -> str:
-    if read is None or chrom is None:
-        return f"<div class='read'><b>{direction}</b>: <span class='FAIL'>missing</span></div>"
-    vid = f"v{len(viewers)}"
-    viewers[vid] = _read_data(read, chrom)
-    reasons = f"<div class='why'>{html.escape('; '.join(read.reasons))}</div>" if read.reasons else ""
-    return (
-        f"<div class='read'><b>{direction}</b> {html.escape(chrom.path.name)} "
-        f"<span class='{read.status}'>{read.status}</span> &middot; {read.good_fraction:.1%} bases &ge; Q{min_q} "
-        f"&middot; mean QV {read.mean_quality:.1f} &middot; trimmed {read.trim_start + 1}-{read.trim_end} "
-        f"({read.trimmed_length} bp){reasons}"
-        f"<div class='chrom'><canvas data-viewer='{vid}'></canvas></div></div>"
-    )
-
-
-def _alignment_view(c: SampleCall, reference: str, width: int = 60) -> str:
-    """Reference vs consensus in blocks, with differences, mixtures, Ns and marks highlighted."""
-    if not c.positions:
-        return ""
-    cols = []
-    for p in c.positions:
-        ref = reference[p.ref_pos] if p.ref_pos is not None and p.ref_pos < len(reference) else GAP
-        cols.append((p, ref))
-    blocks = []
-    for i in range(0, len(cols), width):
-        chunk = cols[i:i + width]
-        first_ref = next((p.ref_pos + 1 for p, _ in chunk if p.ref_pos is not None), "")
-        ref_row, cons_row = [], []
-        for p, ref in chunk:
-            cls = []
-            if p.base == "N":
-                cls.append("n")
-            elif p.base not in "ACGT-":
-                cls.append("mix")
-            elif p.base != ref:
-                cls.append("diff")
-            if p.marks:
-                cls.append("mk")
-            where = f"ref {p.ref_pos + 1}" if p.ref_pos is not None else "insertion"
-            tip = f"{where}: {p.base} (ref {ref}), {p.coverage} read(s), mean Q{p.mean_quality:.0f}"
-            if p.marks:
-                tip += " - " + ", ".join(p.marks)
-            ref_row.append(html.escape(ref))
-            cons_row.append(f"<span class='{' '.join(cls)}' title='{html.escape(tip)}'>{html.escape(p.base)}</span>"
-                            if cls else f"<span title='{html.escape(tip)}'>{html.escape(p.base)}</span>")
-        blocks.append(f"<div class='blk'><span class='lbl'>Ref  {first_ref:>5}</span> {''.join(ref_row)}\n"
-                      f"<span class='lbl'>Cons      </span> {''.join(cons_row)}</div>")
-    legend = ("<div class='legend'><span class='diff'>A</span> differs from reference "
-              "<span class='mix'>R</span> mixture <span class='n'>N</span> no call "
-              "<span class='mk'>A</span> marked (hover for details)</div>")
-    return f"{legend}<pre class='aln'>{''.join(blocks)}</pre>"
-
-
-def _sample_block(s: SampleResult, min_q: int, reference: str, viewers: dict) -> str:
-    c = s.consensus
-    reasons = "".join(f"<li>{html.escape(r)}</li>" for r in c.reasons)
-    seq = html.escape(_wrap(c.sequence, 80)) if c.sequence else "(no assembly)"
-    stats = (f"<p>{c.length} bp &middot; reference {c.ref_start}-{c.ref_end} &middot; mixtures {c.mixtures} "
-             f"({c.mixture_fraction:.1%}) &middot; N {c.n_count} &middot; marks {c.marks} &middot; "
-             f"longest weak single-coverage run {c.max_single_run}"
-             f"{' &middot; indels: ' + html.escape('; '.join(c.indels)) if c.indels else ''}</p>"
-             if c.positions else "")
-    fasta_label = "Consensus (FASTA)" if c.status == "PASS" else "Assembly (not exported: sample failed)"
-    return (
-        f"<section><h2>{html.escape(s.sample)} <span class='{c.status}'>{c.status}</span></h2>{stats}"
-        f"{'<ul>' + reasons + '</ul>' if reasons else ''}"
-        f"{_alignment_view(c, reference)}"
-        f"{_read_block('Forward', c.forward, s.forward_chrom, min_q, viewers)}"
-        f"{_read_block('Reverse', c.reverse, s.reverse_chrom, min_q, viewers)}"
-        f"<details><summary>{fasta_label}</summary><pre>&gt;{html.escape(s.sample)}\n{seq}</pre></details></section>"
-    )
-
-
-_VIEWER_JS = r"""
-const COLORS = {A: '#2e7d32', C: '#1565c0', G: '#212121', T: '#c62828'};
-function drawViewer(canvas, d, minQ) {
-  const n = d.calls.length, hasTr = d.peaks.length === n && n > 1;
-  const nPts = hasTr ? d.traces.A.length : n * 6;
-  const px = 2, W = Math.max(nPts * px, 200), H = 200;
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-  canvas.width = W * dpr; canvas.height = H * dpr;
-  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
-  const g = canvas.getContext('2d'); g.scale(dpr, dpr);
-  const peak = i => (hasTr ? d.peaks[i] : i * 6 + 3) * px;
-  const top = 34, trH = 118, qTop = 160, qH = 36;
-  // shade the trimmed-off ends
-  g.fillStyle = 'rgba(128,128,128,0.15)';
-  const t0 = d.trim[0] > 0 ? (peak(d.trim[0] - 1) + peak(d.trim[0])) / 2 : 0;
-  const t1 = d.trim[1] < n ? (peak(d.trim[1] - 1) + peak(d.trim[1])) / 2 : W;
-  g.fillRect(0, 0, t0, H); g.fillRect(t1, 0, W - t1, H);
-  if (hasTr) {
-    let max = 1;
-    const lo = Math.floor(t0 / px), hi = Math.ceil(t1 / px);
-    for (const b of 'ACGT') for (let i = lo; i < hi; i++) max = Math.max(max, d.traces[b][i] || 0);
-    for (const b of 'ACGT') {
-      g.strokeStyle = COLORS[b]; g.lineWidth = 1; g.beginPath();
-      d.traces[b].forEach((v, i) => {
-        const y = top + trH - Math.min(v / max, 1.05) * trH;
-        i ? g.lineTo(i * px, y) : g.moveTo(0, y);
-      });
-      g.stroke();
-    }
-  }
-  g.textAlign = 'center';
-  for (let i = 0; i < n; i++) {
-    const x = peak(i), b = d.calls[i];
-    g.font = 'bold 11px monospace'; g.fillStyle = COLORS[b] || '#ff6f00';
-    g.fillText(b, x, 13);
-    if ((i + 1) % 10 === 0) { g.font = '9px sans-serif'; g.fillStyle = '#777'; g.fillText(i + 1, x, 26); }
-    const q = d.quals[i] || 0;
-    g.fillStyle = q >= minQ ? '#66bb6a' : '#ef5350';
-    const h = Math.min(q, 60) / 60 * qH;
-    g.fillRect(x - px * 2, qTop + qH - h, px * 4 - 1, h);
-  }
-  g.strokeStyle = '#999'; g.setLineDash([3, 3]);
-  const yq = qTop + qH - minQ / 60 * qH;
-  g.beginPath(); g.moveTo(0, yq); g.lineTo(W, yq); g.stroke();
+# key -> (writer, encoding, newline)
+_WRITERS: dict[str, tuple[Callable[[RunResult, TextIO], None], str, str | None]] = {
+    "consensus": (write_consensus, "utf-8", "\n"),
+    "reads": (write_trimmed_reads, "utf-8", "\n"),
+    "samples_csv": (write_sample_summary, "utf-8-sig", ""),
+    "reads_csv": (write_read_qc, "utf-8-sig", ""),
+    "marks_csv": (write_marks, "utf-8-sig", ""),
+    "run_info": (write_run_info, "utf-8", "\n"),
+    "html": (write_html, "utf-8", None),
 }
-document.querySelectorAll('canvas[data-viewer]').forEach(c => drawViewer(c, VIEWERS[c.dataset.viewer], MIN_Q));
-"""
 
 
-def render_html(result: RunResult) -> str:
-    st = result.settings
-    counts = {k: sum(1 for s in result.samples if s.consensus.status == k) for k in ("PASS", "FAIL")}
-    rows = "".join(
-        f"<tr><td><a href='#s{i}'>{html.escape(s.sample)}</a></td><td class='{s.consensus.status}'>"
-        f"{s.consensus.status}</td><td>{s.consensus.length}</td><td>{s.consensus.mixtures}</td>"
-        f"<td>{s.consensus.n_count}</td><td>{s.consensus.marks}</td>"
-        f"<td>{html.escape('; '.join(s.consensus.reasons))}</td></tr>"
-        for i, s in enumerate(result.samples)
-    )
-    viewers: dict = {}
-    blocks = "".join(f"<a id='s{i}'></a>{_sample_block(s, st.min_quality, result.reference, viewers)}"
-                     for i, s in enumerate(result.samples))
-    data = json.dumps(viewers, separators=(",", ":")).replace("</", "<\\/")
-    extra = ""
-    if result.unpaired:
-        extra += "<p><b>Files without a forward/reverse tag (or duplicates), not analysed:</b> " + ", ".join(
-            html.escape(p.name) for p in result.unpaired) + "</p>"
-    if result.errors:
-        extra += "<p><b>Unreadable files:</b></p><ul>" + "".join(
-            f"<li>{html.escape(k)}: {html.escape(v)}</li>" for k, v in result.errors.items()) + "</ul>"
-    return f"""<!doctype html><html><head><meta charset='utf-8'><title>Sanger QC report</title>
-<style>
-body{{font-family:system-ui,sans-serif;margin:24px;color:#222;max-width:1100px}}
-table{{border-collapse:collapse}}td,th{{border:1px solid #ddd;padding:3px 10px;text-align:left;vertical-align:top}}
-.PASS{{color:#1b5e20;font-weight:600}}.FAIL{{color:#b71c1c;font-weight:600}}
-section{{border-top:2px solid #eee;margin-top:18px}}.read{{margin:8px 0}}.why{{color:#b71c1c;font-size:90%}}
-pre{{background:#f6f6f6;padding:8px;font-size:12px;overflow-x:auto}}small{{color:#666}}
-.chrom{{overflow-x:auto;border:1px solid #ddd;background:#fff;margin-top:4px}}.chrom canvas{{display:block}}
-.aln{{background:#fbfbfb;line-height:1.5}}.aln .blk{{margin-bottom:6px}}.lbl{{color:#888}}
-.diff{{background:#bbdefb}}.mix{{background:#ffe082;font-weight:700}}.n{{background:#ef9a9a}}
-.mk{{border-bottom:2px solid #fb8c00}}.legend{{font-size:85%;margin:6px 0}}.legend span{{font-family:monospace;padding:0 3px}}
-</style></head><body>
-<h1>Sanger QC report</h1>
-<p>sanger_seq_analyzer {__version__} &middot; {datetime.now():%Y-%m-%d %H:%M}</p>
-<p><small>Read rule: &ge; {st.min_good_fraction:.0%} of bases &ge; Q{st.min_quality}, trimmed length &ge;
-{st.min_trimmed_length} bp{', forward and reverse both required' if st.require_both_directions else ''}.
-RECall rules (Woods et al. 2012): bases &lt; Q{st.censor_quality} censored; mixture area &ge; {st.mixture_area:.1%};
-mark area &ge; {st.mark_area:.1%}; mark average quality &lt; Q{st.mark_avg_quality}. Fail on stop codon, frameshift
-insert/deletion, mixtures &gt; {st.max_mixture_fraction:.1%}, N &ge; {st.max_n + 1}, marks &ge; {st.max_marks + 1},
-&gt; {st.max_single_coverage_run} consecutive single-coverage bases &lt; Q{st.single_coverage_quality},
-or no usable coverage.</small></p>
-<p><span class='PASS'>PASS {counts['PASS']}</span> &middot; <span class='FAIL'>FAIL {counts['FAIL']}</span></p>
-<table><tr><th>Sample</th><th>Status</th><th>Length</th><th>Mixtures</th><th>N</th><th>Marks</th><th>Reasons</th></tr>
-{rows}</table>
-{extra}{blocks}
-<p><small>Chromatograms: A green, C blue, G black, T red; bars show each base's quality (dashed line = Q{st.min_quality});
-grey = trimmed ends. Scroll sideways to see the whole read.</small></p>
-<script>const VIEWERS = {data}; const MIN_Q = {st.min_quality};{_VIEWER_JS}</script></body></html>"""
+def write_file(result: RunResult, key: str, outdir: str | Path) -> Path:
+    """Write one export file atomically; raises :class:`ExportError`."""
+    path = Path(outdir) / EXPORT_BY_KEY[key].filename
+    part = path.with_name(path.name + ".part")
+    writer, encoding, newline = _WRITERS[key]
+    try:
+        with open(part, "w", encoding=encoding, newline=newline) as fh:
+            writer(result, fh)
+        os.replace(part, path)
+    except OSError as exc:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        raise ExportError(path, exc) from exc
+    return path
+
+
+def write_outputs(result: RunResult, outdir: str | Path, html_report: bool = True,
+                  files: list[str] | None = None) -> dict[str, Path]:
+    """Write the export files (all of them by default) into ``outdir``; returns key -> path."""
+    out = Path(outdir)
+    keys = files if files is not None else [f.key for f in EXPORT_FILES if html_report or f.key != "html"]
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ExportError(out, exc) from exc
+    return {key: write_file(result, key, out) for key in keys}
+
+
+def export_counts(result: RunResult) -> dict[str, str]:
+    """What each export file will hold, for the export dialog ("3 sequences", "21 rows")."""
+    def n(count: int, word: str) -> str:
+        return f"{count:,} {word}{'' if count == 1 else 's'}"
+    marks = sum(1 for s in result.samples for p in s.consensus.positions if p.marks)
+    reads = sum(1 for s in result.samples for r in (s.consensus.forward, s.consensus.reverse) if r is not None)
+    return {
+        "consensus": n(result.count("PASS"), "sequence"),
+        "html": n(len(result.samples), "sample"),
+        "samples_csv": n(len(result.samples), "row"),
+        "reads_csv": n(reads, "row"),
+        "marks_csv": n(marks, "row"),
+        "reads": n(sum(1 for _ in _passed_reads(result)), "read"),
+        "run_info": "1 file",
+    }

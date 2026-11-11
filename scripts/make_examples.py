@@ -110,7 +110,8 @@ def main() -> None:
     # Forward read only: the reverse read is missing.
     pair("bad", "BAD07", amplicon, skip="R")
     # Both reads pass the 75% cutoff (76% / 77%), but their weak bases are spread through the
-    # middle instead of at the ends, so RECall rejects the assembly (Ns, marks, no usable coverage).
+    # middle instead of at the ends, so many positions get a low average quality and RECall
+    # rejects the assembly on the mark count (113 marked positions, fail at >= 100).
     pair("bad", "BAD08", amplicon, dict(good_fraction=0.76, weak="scatter"), dict(good_fraction=0.77, weak="scatter"))
 
     print(f"Wrote examples to {EX}")

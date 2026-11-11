@@ -10,10 +10,10 @@ import argparse
 import sys
 
 from . import __version__
-from .pipeline import FORWARD_TAGS, REVERSE_TAGS, load_reference, run
+from .pipeline import FORWARD_TAGS, REVERSE_TAGS, run, validate_tags
 from .qc import QCSettings
-from .references import REFERENCES
-from .report import write_outputs
+from .references import REFERENCES, ReferenceError, coding_warnings, resolve_reference
+from .report import ExportError, write_outputs
 
 
 def _add_qc_options(p: argparse.ArgumentParser) -> None:
@@ -22,6 +22,8 @@ def _add_qc_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("-r", "--reference", required=True,
                    help="built-in reference name (see 'sanger-seq references', e.g. measles-n450) or a FASTA "
                         "of the region to assemble against; its first base starts codon 1")
+    p.add_argument("--reference-record", metavar="ID",
+                   help="record to use when the reference FASTA holds several sequences")
     p.add_argument("-o", "--outdir", default="sanger_results", help="output folder (default: %(default)s)")
 
     g = p.add_argument_group("lab read rules")
@@ -61,6 +63,19 @@ def _add_qc_options(p: argparse.ArgumentParser) -> None:
                    help="reference position where codon 1 starts (default: %(default)s)")
     g.add_argument("--non-coding", action="store_true",
                    help="target is not protein coding: skip stop-codon and frameshift checks")
+    g.add_argument("--allow-partial-coverage", action="store_true",
+                   help="do not require reads over the whole reference (RECall default: double coverage of all of it)")
+
+    g = p.add_argument_group("reference alignment")
+    g.add_argument("--no-orientation-check", action="store_true",
+                   help="do not require the forward read on the plus strand and the reverse read on the minus "
+                        "strand (use for references stored reverse-complemented); same-strand pairs still fail")
+    g.add_argument("--trim-error-limit", type=float, default=d.trim_error_limit,
+                   help="Mott end-trimming error limit (default: %(default)s)")
+    g.add_argument("--min-identity", type=float, default=d.min_read_identity * 100,
+                   help="a read must match the reference at least this %% (default: %(default)s)")
+    g.add_argument("--min-aligned", type=int, default=d.min_read_aligned,
+                   help="a read must align over at least this many bases (default: %(default)s)")
     p.add_argument("--no-html", action="store_true", help="skip the HTML report")
 
 
@@ -83,22 +98,50 @@ def settings_from_args(args: argparse.Namespace) -> QCSettings:
         frame=args.frame,
         check_stop_codons=not args.non_coding,
         check_frameshifts=not args.non_coding,
+        trim_error_limit=args.trim_error_limit,
+        min_read_identity=args.min_identity / 100,
+        min_read_aligned=args.min_aligned,
+        require_full_reference=not args.allow_partial_coverage,
+        check_read_orientation=not args.no_orientation_check,
     )
+
+
+def _tags(text: str) -> tuple[str, ...]:
+    return tuple(t.strip() for t in text.split(",") if t.strip())
 
 
 def cmd_qc(args: argparse.Namespace) -> int:
-    result = run(
-        args.inputs,
-        load_reference(args.reference),
-        settings_from_args(args),
-        forward_tags=tuple(t.strip() for t in args.forward_tags.split(",") if t.strip()),
-        reverse_tags=tuple(t.strip() for t in args.reverse_tags.split(",") if t.strip()),
-        progress=lambda n, total, name: print(f"[{n}/{total}] {name}", file=sys.stderr),
-    )
+    settings = settings_from_args(args)
+    forward_tags, reverse_tags = _tags(args.forward_tags), _tags(args.reverse_tags)
+    problems = validate_tags(forward_tags, reverse_tags)
+    if problems:
+        print("error: " + "; ".join(problems), file=sys.stderr)
+        return 2
+    try:
+        reference = resolve_reference(args.reference, args.reference_record)
+    except ReferenceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    warnings = reference.warnings + (coding_warnings(reference.sequence, settings.frame)
+                                     if settings.check_stop_codons or settings.check_frameshifts else [])
+    for w in warnings:
+        print(f"warning: reference {reference.name}: {w}", file=sys.stderr)
+
+    result = run(args.inputs, reference, settings, forward_tags=forward_tags, reverse_tags=reverse_tags,
+                 progress=lambda n, total, name: print(f"[{n}/{total}] {name}", file=sys.stderr))
+    for s in result.skipped:
+        print(f"not analysed: {s.path} ({s.text})", file=sys.stderr)
+    for p, err in result.errors.items():
+        print(f"error: {p}: {err}", file=sys.stderr)
     if not result.samples:
-        print("No forward/reverse .ab1 files found.", file=sys.stderr)
+        print("No forward/reverse .ab1 files found. File names need a direction tag, for example "
+              "SAMPLE_F.ab1 and SAMPLE_R.ab1.", file=sys.stderr)
         return 1
-    paths = write_outputs(result, args.outdir, html_report=not args.no_html)
+    try:
+        paths = write_outputs(result, args.outdir, html_report=not args.no_html)
+    except ExportError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     width = max(len(s.sample) for s in result.samples)
     print(f"\n{'sample':<{width}}  status  length  mix  N   marks  reasons")
@@ -106,19 +149,18 @@ def cmd_qc(args: argparse.Namespace) -> int:
         c = s.consensus
         print(f"{s.sample:<{width}}  {c.status:<6}  {c.length:>6}  {c.mixtures:>3}  {c.n_count:>2}  {c.marks:>5}  "
               f"{'; '.join(c.reasons)}")
-    for p in result.unpaired:
-        print(f"skipped (no F/R tag or duplicate): {p.name}", file=sys.stderr)
-    for p, err in result.errors.items():
-        print(f"error reading {p}: {err}", file=sys.stderr)
     print(f"\nOutputs written to {paths['consensus'].parent}")
     return 0
 
 
 def cmd_gui(args: argparse.Namespace) -> int:
-    from .gui import main as gui_main
-
-    gui_main()
-    return 0
+    try:
+        from .gui import main as gui_main
+    except ImportError as exc:
+        print(f"The desktop window is not included in this build ({exc}).\n"
+              "Install it with: pip install PySide6-Essentials", file=sys.stderr)
+        return 1
+    return gui_main([])
 
 
 def cmd_references(args: argparse.Namespace) -> int:

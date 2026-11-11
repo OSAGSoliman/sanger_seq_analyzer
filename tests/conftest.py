@@ -36,3 +36,17 @@ def make_pair(tmp_path):
         make_read(tmp_path / f"{sample}_R.ab1", sample, revcomp(amplicon[100:]), rng, **(r_kw or {}))
         return tmp_path, reference
     return _make
+
+
+@pytest.fixture(scope="session")
+def examples_run():
+    """The bundled examples analysed once against the built-in measles N-450 reference."""
+    from sanger_seq_analyzer.pipeline import run
+    return run([EXAMPLES], "measles-n450")
+
+
+@pytest.fixture(scope="session")
+def example(examples_run):
+    """Look up one sample of ``examples_run`` by name."""
+    by_name = {s.sample: s for s in examples_run.samples}
+    return by_name.__getitem__
