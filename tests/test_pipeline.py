@@ -80,7 +80,7 @@ EXPECTED = {
 
 
 def test_examples_give_expected_result(examples_dir, tmp_path):
-    res = run([examples_dir], load_reference(examples_dir / "reference.fasta"))
+    res = run([examples_dir], load_reference("measles-n450"))
     got = {s.sample: s.consensus for s in res.samples}
     assert set(got) == set(EXPECTED)
     for name, expect in EXPECTED.items():
@@ -101,7 +101,7 @@ def test_examples_give_expected_result(examples_dir, tmp_path):
 
 def test_cli(examples_dir, tmp_path):
     from sanger_seq_analyzer.cli import main
-    rc = main(["qc", str(examples_dir / "good"), "-r", str(examples_dir / "reference.fasta"),
+    rc = main(["qc", str(examples_dir / "good"), "-r", "measles-n450",
                "-o", str(tmp_path), "--no-html"])
     assert rc == 0
     assert (tmp_path / "consensus.fasta").read_text().count(">") == 3

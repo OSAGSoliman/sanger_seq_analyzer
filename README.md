@@ -92,9 +92,10 @@ are on the phred scale. It measures peak areas from the processed traces in the 
 
 ## Examples: good and bad
 
-`examples/` contains simulated `.ab1` files. A synthetic 1000 bp amplicon is read by a
-forward and a reverse primer. `examples/reference.fasta` is the 561 bp (187-codon)
-protein-coding target inside it. Each sample was built to give one outcome, so the correct
+`examples/` contains simulated `.ab1` files built on the real measles **N-450** sequence
+(the built-in `measles-n450` reference). The sequence sits inside a simulated 1000 bp amplicon
+with random flanking sequence, which is read by a forward and a reverse primer. Run them with
+`-r measles-n450`; this is already the default in the desktop window. Each sample was built to give one outcome, so the correct
 result is known. To rebuild them, run `python scripts/make_examples.py`.
 
 | Sample | Result | Why |
@@ -107,12 +108,12 @@ result is known. To rebuild them, run `python scripts/make_examples.py`.
 | BAD03 | FAIL | the reverse read comes from another template (sample mix-up) and does not match the reference |
 | BAD04 | FAIL | stop codon at codon 60 |
 | BAD05 | FAIL | 1 bp deletion (frameshift) |
-| BAD06 | FAIL | 30 mixtures (5.3%, above 3.5%) |
+| BAD06 | FAIL | 28 mixtures (6.2%, above 3.5%) |
 | BAD07 | FAIL | forward read only. The reverse read is missing |
-| BAD08 | FAIL | both reads pass 75% (79% and 81%), but their weak bases are spread through the target. RECall rejects it: too many marks and positions with no usable call |
+| BAD08 | FAIL | both reads pass 75% (76% and 77%), but their weak bases are spread through the target. RECall rejects it: 100 or more marked positions |
 
 ```
-sanger-seq qc examples -r examples/reference.fasta -o sanger_results
+sanger-seq qc examples -r measles-n450 -o sanger_results
 ```
 
 ## Installing and running
@@ -123,7 +124,7 @@ Download `SangerSeqAnalyzer-windows.zip` or `SangerSeqAnalyzer-macos.zip` from
 [Releases](https://github.com/OSAGSoliman/sanger_seq_analyzer/releases).
 
 - **Windows:** unzip, then run `SangerSeqAnalyzer\SangerSeqAnalyzer.exe` to open the window, or
-  `sanger-seq.exe qc <folder> -r reference.fasta` from a command prompt. If SmartScreen warns
+  `sanger-seq.exe qc <folder> -r measles-n450` from a command prompt. If SmartScreen warns
   you, choose *More info*, then *Run anyway*.
 - **macOS:** unzip and open `SangerSeqAnalyzer.app`. The app is not signed, so the first time
   you must right-click it and choose **Open**, or run `xattr -cr SangerSeqAnalyzer.app`.
@@ -134,7 +135,7 @@ Download `SangerSeqAnalyzer-windows.zip` or `SangerSeqAnalyzer-macos.zip` from
 ```
 pip install git+https://github.com/OSAGSoliman/sanger_seq_analyzer.git
 sanger-seq-gui                                        # opens the window
-sanger-seq qc path/to/ab1_folder -r reference.fasta -o results
+sanger-seq qc path/to/ab1_folder -r measles-n450 -o results   # or -r your_reference.fasta
 ```
 
 **File naming:** the sample name is everything before the last direction tag (F, FWD, FOR,

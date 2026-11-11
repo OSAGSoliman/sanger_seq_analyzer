@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q
-      - run: sanger-seq qc examples --reference examples/reference.fasta -o sanger_results
+      - run: sanger-seq qc examples --reference measles-n450 -o sanger_results
 
   build:
     needs: test
@@ -48,7 +48,7 @@ jobs:
           pyinstaller --noconfirm --onefile --name sanger-seq packaging/launcher.py
       - name: Smoke test the command-line build
         shell: bash
-        run: ./dist/sanger-seq qc examples -r examples/reference.fasta -o smoke && test -s smoke/consensus.fasta
+        run: ./dist/sanger-seq qc examples -r measles-n450 -o smoke && test -s smoke/consensus.fasta
       - name: Package
         shell: bash
         run: |
