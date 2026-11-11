@@ -12,6 +12,7 @@ import sys
 from . import __version__
 from .pipeline import FORWARD_TAGS, REVERSE_TAGS, load_reference, run
 from .qc import QCSettings
+from .references import REFERENCES
 from .report import write_outputs
 
 
@@ -19,7 +20,8 @@ def _add_qc_options(p: argparse.ArgumentParser) -> None:
     d = QCSettings()
     p.add_argument("inputs", nargs="+", help=".ab1 files and/or folders containing them")
     p.add_argument("-r", "--reference", required=True,
-                   help="FASTA of the region to assemble against (e.g. HXB2 PR-RT); its first base starts codon 1")
+                   help="built-in reference name (see 'sanger-seq references', e.g. measles-n450) or a FASTA "
+                        "of the region to assemble against; its first base starts codon 1")
     p.add_argument("-o", "--outdir", default="sanger_results", help="output folder (default: %(default)s)")
 
     g = p.add_argument_group("lab read rules")
@@ -119,6 +121,12 @@ def cmd_gui(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_references(args: argparse.Namespace) -> int:
+    for ref in REFERENCES.values():
+        print(f"{ref.name}\t{len(ref.sequence)} bp\t{ref.description}\n\tsource: {ref.source}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sanger-seq", description="Sanger sequencing analysis toolkit")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -127,6 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("qc", help="QC and assemble forward/reverse .ab1 reads with RECall rules")
     _add_qc_options(p)
     p.set_defaults(func=cmd_qc)
+
+    p = sub.add_parser("references", help="list built-in reference sequences")
+    p.set_defaults(func=cmd_references)
 
     p = sub.add_parser("gui", help="open the desktop window")
     p.set_defaults(func=cmd_gui)

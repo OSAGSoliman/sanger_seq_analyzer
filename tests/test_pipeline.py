@@ -105,3 +105,22 @@ def test_cli(examples_dir, tmp_path):
                "-o", str(tmp_path), "--no-html"])
     assert rc == 0
     assert (tmp_path / "consensus.fasta").read_text().count(">") == 3
+
+
+def test_builtin_measles_n450():
+    from sanger_seq_analyzer.recall import STOPS
+    ref = load_reference("measles-n450")
+    assert len(ref) == 450 and ref.startswith("GTCAGTTCC") and ref.endswith("GATCTTCTAGAC")
+    assert not any(ref[i:i + 3] in STOPS for i in range(0, 450, 3))
+
+
+def test_measles_reads_against_builtin(tmp_path):
+    import numpy as np
+    from sanger_seq_analyzer.simulate import make_read, revcomp
+    rng = np.random.default_rng(7)
+    ref = load_reference("measles-n450")
+    amplicon = "".join(rng.choice(list("ACGT"), 90)) + ref + "".join(rng.choice(list("ACGT"), 90))
+    make_read(tmp_path / "MV1_F.ab1", "MV1", amplicon[:600], rng)
+    make_read(tmp_path / "MV1_R.ab1", "MV1", revcomp(amplicon[30:]), rng)
+    c = run([tmp_path], ref).samples[0].consensus
+    assert c.status == "PASS" and c.sequence == ref

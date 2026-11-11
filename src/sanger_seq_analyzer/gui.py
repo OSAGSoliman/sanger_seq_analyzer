@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__
 from .pipeline import load_reference, run
 from .qc import QCSettings
+from .references import REFERENCES
 from .report import write_outputs
 
 
@@ -25,7 +26,7 @@ class App(ttk.Frame):
 
         self.input_dir = tk.StringVar()
         self.output_dir = tk.StringVar()
-        self.reference = tk.StringVar()
+        self.reference = tk.StringVar(value="measles-n450")
         self.cutoff = tk.DoubleVar(value=d.min_good_fraction * 100)
         self.min_q = tk.IntVar(value=d.min_quality)
         self.min_len = tk.IntVar(value=d.min_trimmed_length)
@@ -44,7 +45,10 @@ class App(ttk.Frame):
 
         path_row(0, "AB1 folder", self.input_dir, self.pick_input)
         path_row(1, "Output folder", self.output_dir, self.pick_output)
-        path_row(2, "Reference FASTA", self.reference, self.pick_reference)
+        ttk.Label(self, text="Reference").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Combobox(self, textvariable=self.reference, values=list(REFERENCES)).grid(
+            row=2, column=1, sticky="ew", padx=6)
+        ttk.Button(self, text="FASTA…", command=self.pick_reference).grid(row=2, column=2)
 
         opts = ttk.LabelFrame(self, text="QC settings", padding=8)
         opts.grid(row=3, column=0, columnspan=3, sticky="ew", pady=8)
@@ -104,8 +108,9 @@ class App(ttk.Frame):
         if not self.input_dir.get() or not Path(self.input_dir.get()).is_dir():
             messagebox.showerror("Sanger QC", "Choose a folder containing .ab1 files.")
             return
-        if not self.reference.get() or not Path(self.reference.get()).is_file():
-            messagebox.showerror("Sanger QC", "Choose the reference FASTA to assemble against.")
+        ref = self.reference.get().strip()
+        if not ref or (ref.lower() not in REFERENCES and not Path(ref).is_file()):
+            messagebox.showerror("Sanger QC", "Choose a built-in reference or a reference FASTA file.")
             return
         try:
             settings = QCSettings(

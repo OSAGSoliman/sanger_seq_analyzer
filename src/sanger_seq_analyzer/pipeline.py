@@ -8,6 +8,7 @@ from pathlib import Path
 
 from Bio import SeqIO
 
+from . import references
 from .abi import Chromatogram, read_ab1
 from .qc import QCSettings, ReadQC, qc_read
 from .recall import SampleCall, call_sample
@@ -77,7 +78,10 @@ def pair_files(files: list[Path], forward_tags=FORWARD_TAGS, reverse_tags=REVERS
 
 
 def load_reference(path: str | Path) -> str:
-    """First sequence of a FASTA file (the region RECall assembles against)."""
+    """A built-in reference by name (e.g. ``measles-n450``) or the first sequence of a FASTA file."""
+    builtin = references.get(str(path))
+    if builtin is not None and not Path(path).is_file():
+        return builtin.sequence
     records = list(SeqIO.parse(str(path), "fasta"))
     if not records:
         raise ValueError(f"no FASTA sequence found in {path}")

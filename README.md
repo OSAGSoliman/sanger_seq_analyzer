@@ -57,9 +57,23 @@ A sample **fails** if any of these is true:
 Every number can be changed. Run `sanger-seq qc --help` to see the options. For a target
 that does not code for a protein, `--non-coding` turns off the stop-codon and frameshift checks.
 
-**The reference** is the region you want to sequence, for example HXB2 PR-RT. Its first base
-is the first base of codon 1; use `--frame` if codon 1 starts elsewhere. The consensus covers
-only that region.
+**The reference** is the region you want to sequence. Its first base is the first base of
+codon 1; use `--frame` if codon 1 starts elsewhere. The consensus covers only that region.
+You can give your own FASTA file, or the name of a built-in reference (run
+`sanger-seq references` to list them):
+
+| Name | Region | Source |
+|---|---|---|
+| `measles-n450` | Measles virus **N-450**, the WHO genotyping region: the last 450 nt of the nucleoprotein (N) gene, N codons 376-525 | RefSeq [NC_001498.1](https://www.ncbi.nlm.nih.gov/nuccore/NC_001498.1) (strain Ichinose-B95a), genome positions 1233-1682. Also saved as `references/measles_N450_NC_001498.fasta` |
+
+```
+sanger-seq qc my_ab1_folder -r measles-n450 -o results
+```
+
+In the desktop window, the reference box is set to `measles-n450` by default.
+
+Report positions are numbered within N-450 (1-450). To convert to genome positions, add 1232;
+to convert to N codons, add 375 to the codon number.
 
 **Differences from RECall.** RECall reruns phred to call bases. This tool uses the base calls
 and quality values already stored in the `.ab1` file, which come from the ABI KB basecaller and
