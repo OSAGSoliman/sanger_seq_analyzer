@@ -104,3 +104,35 @@ def test_copy_table(tool):
     tool.results.list.view.setFocus()
     text = tool.results.list.model.as_tsv()
     assert text.splitlines()[0].startswith("sample\tstatus") and len(text.splitlines()) == 12
+
+
+def test_copy_reads_when_there_is_no_assembly(tool):
+    d = select(tool, "BAD01").detail  # both reads too short to assemble
+    d.switch.setIndex(3)
+    assert not d.copy_seq.isEnabled() and d.copy_fasta.isEnabled() and d.copy_fasta.text() == "Copy reads FASTA"
+    d._copy_fasta()
+    text = QGuiApplication.clipboard().text()
+    assert text.startswith(">BAD01_F forward read, trimmed, as sequenced") and "\n>BAD01_R reverse read" in text
+    d = select(tool, "GOOD01").detail
+    assert d.copy_seq.isEnabled() and d.copy_fasta.text() == "Copy FASTA"
+
+
+def test_ctrl_c_and_right_click_copy_table_rows(tool):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    from sanger_seq_analyzer.gui.widgets.table_copy import copy_menu
+    view = select(tool, "GOOD01").detail.rules
+    n = view.model().rowCount()
+    view.selectAll()
+    QGuiApplication.clipboard().setText("")
+    QApplication.sendEvent(view, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier))
+    lines = QGuiApplication.clipboard().text().splitlines()
+    assert len(lines) == n and all(line.count("\t") == 4 for line in lines)  # 5 columns
+    menu = copy_menu(view, view.visualRect(view.model().index(0, 0)).center())
+    texts = [a.text() for a in menu.actions() if a.text()]
+    assert texts == ["Copy", "Copy with headers", f"Copy all shown rows ({n}) with headers"]
+    assert all(a.isEnabled() for a in menu.actions())
+    menu.actions()[1].trigger()
+    assert QGuiApplication.clipboard().text().upper().startswith("RULE\tTYPE\tOBSERVED\tLIMIT\tRESULT\n")

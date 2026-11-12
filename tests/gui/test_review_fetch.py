@@ -145,6 +145,34 @@ def test_fetch_page_links_files_and_saves_to_template(window, tmp_path, monkeypa
     assert names["02SV269990003"] == "MVs/Dubai.ARE/11.26/8"
     assert page.matching.rowCount() == 6 and page.allcols.columnCount() > 60
 
+    # rows are green (PASS), red (FAIL in the genotyping table) or yellow (to check)
+    from sanger_seq_analyzer.gui.theme import current
+    state = {r.accession: r.state for r in fc.rows}
+    assert state["02SV269990001"] == state["02SV269990002"] == "fail"
+    assert state["02SV269990004"] == "pass" and state["02SV269990006"] == "check"
+    colour = {"pass": "pass.bg", "fail": "fail.bg", "check": "warn.bg"}
+    for r, row in enumerate(fc.rows):
+        for c in (0, 1, page.means.columnCount() - 1):
+            assert page.means.item(r, c).background().color() == current().c(colour[row.state])
+    assert "2 fail (red)" in page.results_summary.text() and "pass (green)" in page.results_summary.text()
+    r1 = next(i for i, r in enumerate(fc.rows) if r.accession == "02SV269990001")
+    assert page.means.item(r1, 1).toolTip().startswith("FAIL in the genotyping table")
+
+    # Ctrl+C copies the selected cells; "Copy all shown rows" adds the headers and leaves out the tick boxes
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QGuiApplication, QKeyEvent
+    from PySide6.QtWidgets import QApplication
+    from sanger_seq_analyzer.gui.widgets.table_copy import copy_all
+    page.means.clearSelection()
+    page.means.setCurrentCell(r1, 1)
+    page.means.selectRow(r1)
+    QApplication.sendEvent(page.means, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_C,
+                                                 Qt.KeyboardModifier.ControlModifier))
+    copied = QGuiApplication.clipboard().text().rstrip("\n").split("\t")
+    assert len(copied) == 19 and "02SV269990001" in copied
+    lines = copy_all(page.means, skip_columns=(0,)).splitlines()
+    assert lines[0].split("\t") == fc.columns and len(lines) == 7
+
     # editing Admin Level 1 renames the strain
     r4 = next(i for i, r in enumerate(fc.rows) if r.accession == "02SV269990004")
     admin = 1 + fc.columns.index("Admin Level 1")

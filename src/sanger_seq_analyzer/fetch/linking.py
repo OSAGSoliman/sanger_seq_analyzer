@@ -252,15 +252,29 @@ class MeansRow:
     problems: list[str] = field(default_factory=list)
     strain_manual: bool = False  # the user typed the strain name: keep it when names are regenerated
     include: bool = True  # save this row to the template
+    failed: bool = False  # the genotyping row says FAIL, REINJECT or REPEAT
 
     @property
     def accession(self) -> str:
         return self.sample.accession
 
+    @property
+    def state(self) -> str:
+        """'fail' (red), 'check' (yellow: a problem or note, or no genotype) or 'pass' (green)."""
+        if self.failed:
+            return "fail"
+        if self.problems or self.sample.notes or self.values.get("to upload?") != "Yes":
+            return "check"
+        return "pass"
+
+
+def _failed(comments, final) -> bool:
+    text = f"{as_text(comments)} {as_text(final)}".upper()
+    return "FAIL" in text or "REINJECT" in text or "REPEAT" in text
+
 
 def _upload_flag(genotype, comments, final) -> str:
-    text = f"{as_text(comments)} {as_text(final)}".upper()
-    if "FAIL" in text or "REINJECT" in text or "REPEAT" in text:
+    if _failed(comments, final):
         return "No"
     return "Yes" if as_text(genotype) else "No"
 
@@ -296,9 +310,9 @@ def build_rows(linked: Linked, virus: str = "MVs", existing_names=(), today: dat
         values["UPLOADED?"] = "No"
         g = s.rows["genotyping"] or {}
         gt = linked.tables["genotyping"]
-        values["to upload?"] = _upload_flag(values["Genotype"], g.get(gt.column("COMMENTS") or "", ""),
-                                            g.get(gt.column("FINAL") or "", ""))
-        row = MeansRow(s, values, sources, include=values["to upload?"] == "Yes")
+        comments, final = g.get(gt.column("COMMENTS") or "", ""), g.get(gt.column("FINAL") or "", "")
+        values["to upload?"] = _upload_flag(values["Genotype"], comments, final)
+        row = MeansRow(s, values, sources, include=values["to upload?"] == "Yes", failed=_failed(comments, final))
         rows.append(row)
     assign_strain_names(rows, virus, existing_names)
     return rows

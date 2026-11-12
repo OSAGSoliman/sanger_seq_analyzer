@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
 from ... import review
 from ...pipeline import RunResult, SampleResult
 from ...presentation import (
-    fasta_text, metric_tiles, not_analysed_count, plural, reason_views, run_context, skipped_rows, verdict_sentence,
+    fasta_text, metric_tiles, not_analysed_count, plural, reads_fasta_text, reason_views, run_context, skipped_rows,
+    verdict_sentence,
 )
 from ..theme import current
 from ..theme.fonts import mono_font, ui_font
@@ -28,6 +29,7 @@ from ..widgets.notice import Notice
 from ..widgets.ratio_bar import RatioBar
 from ..widgets.reason_box import ReasonBox
 from ..widgets.segmented import Segmented
+from ..widgets.table_copy import install_copy
 from .controller import QcController
 from .models import (
     FLAG_FILTERS, SORTS, ColumnRole, FlaggedPositionsModel, PaddedDelegate, RuleChecklistModel, SampleDelegate,
@@ -189,9 +191,8 @@ class DetailPanel(_Panel):
         self.flagged.clicked.connect(self._row_goto)
         self.copy_seq.clicked.connect(self._copy_sequence)
         self.copy_fasta.clicked.connect(self._copy_fasta)
-        copy = QShortcut(QKeySequence.StandardKey.Copy, self.seq_text)
-        copy.setContext(Qt.ShortcutContext.WidgetShortcut)
-        copy.activated.connect(self._copy_sequence)
+        self.seq_text.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.seq_text.customContextMenuRequested.connect(self._seq_menu)
         self._switched(0)
 
     def _table(self, model) -> QTableView:
@@ -202,9 +203,10 @@ class DetailPanel(_Panel):
         view.verticalHeader().setDefaultSectionSize(30)
         view.setShowGrid(False)
         view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         view.horizontalHeader().setHighlightSections(False)
+        install_copy(view)
         return view
 
     def _switched(self, index: int) -> None:
@@ -233,10 +235,14 @@ class DetailPanel(_Panel):
             self.seq_title.setText(f"{what} · {c.length} bp")
             self.seq_text.setPlainText(fasta_text(sr))
         else:
-            self.seq_title.setText("No assembly for this sample")
-            self.seq_text.setPlainText("")
+            reads = reads_fasta_text(sr)
+            self.seq_title.setText("No assembly for this sample" +
+                                   (" · the trimmed reads are shown, as sequenced" if reads else ""))
+            self.seq_text.setPlainText(reads)
         self.copy_seq.setEnabled(bool(c.sequence))
-        self.copy_fasta.setEnabled(bool(c.sequence))
+        self.copy_seq.setToolTip("" if c.sequence else "No assembled sequence for this sample")
+        self.copy_fasta.setEnabled(bool(self.seq_text.toPlainText()))
+        self.copy_fasta.setText("Copy FASTA" if c.sequence else "Copy reads FASTA")
         self.update_stepper()
 
     def update_stepper(self) -> None:
@@ -262,7 +268,21 @@ class DetailPanel(_Panel):
 
     def _copy_fasta(self) -> None:
         if self.sr is not None:
-            QGuiApplication.clipboard().setText(fasta_text(self.sr))
+            QGuiApplication.clipboard().setText(self.seq_text.toPlainText())
+
+    def _seq_menu(self, pos) -> None:
+        """Copy works with or without a selection: the selected text, the sequence, or the FASTA."""
+        menu = QMenu(self)
+        act = menu.addAction("Copy selected text", self.seq_text.copy)
+        act.setShortcut(QKeySequence.StandardKey.Copy)
+        act.setEnabled(self.seq_text.textCursor().hasSelection())
+        act = menu.addAction("Copy sequence", self._copy_sequence)
+        act.setEnabled(self.copy_seq.isEnabled())
+        act = menu.addAction(self.copy_fasta.text(), self._copy_fasta)
+        act.setEnabled(self.copy_fasta.isEnabled())
+        menu.addSeparator()
+        menu.addAction("Select all", self.seq_text.selectAll)
+        menu.exec(self.seq_text.mapToGlobal(pos))
 
 
 class SampleDetail(QWidget):

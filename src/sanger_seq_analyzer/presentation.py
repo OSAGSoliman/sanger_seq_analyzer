@@ -157,6 +157,21 @@ def fasta_text(sr: SampleResult, width: int = 70) -> str:
     return f">{fasta_header(sr)}\n{body}\n" if seq else ""
 
 
+def reads_fasta_text(sr: SampleResult, width: int = 70) -> str:
+    """The trimmed reads as FASTA, as sequenced (the reverse read is not reverse-complemented).
+
+    Shown and copied for a sample with no assembly, so the reads can still be checked elsewhere.
+    """
+    out = []
+    for direction, name in (("F", "forward"), ("R", "reverse")):
+        read = sr.consensus.reads.get(direction)
+        seq = read.sequence if read is not None else ""
+        if seq:
+            body = "\n".join(seq[i:i + width] for i in range(0, len(seq), width))
+            out.append(f">{sr.sample}_{direction} {name} read, trimmed, as sequenced, {len(seq)} bp\n{body}\n")
+    return "".join(out)
+
+
 # --- reasons -------------------------------------------------------------------------------------------
 
 @dataclass

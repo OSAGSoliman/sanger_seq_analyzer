@@ -28,6 +28,7 @@ from ..widgets.common import button, card, divider, hbox, label, vbox
 from ..widgets.notice import Notice
 from ..widgets.path_field import PathField
 from ..widgets.segmented import Segmented
+from ..widgets.table_copy import install_copy
 from .controller import FILE_FILTER, SOURCE_FILES, SPECS, FetchController
 
 SOURCE_HINTS = {
@@ -37,6 +38,10 @@ SOURCE_HINTS = {
     "template": "existing WHO strain names; confirmed rows are added here (.xlsx or .xlsm)",
 }
 ROW_FILTERS = ("All", "To check", "Not in every file", "Ticked to save")
+ROW_COLORS = {"pass": "pass.bg", "fail": "fail.bg", "check": "warn.bg"}  # green, red, yellow
+STATE_TIPS = {"pass": "PASS: genotyped, found and named without problems",
+              "fail": "FAIL in the genotyping table (FAIL, REINJECT or REPEAT)",
+              "check": "To check"}
 NAME_INPUTS = {"Admin Level 1", "Case Onset Date", "Collection Date", "to upload?"}
 
 
@@ -53,6 +58,10 @@ class GenotypingTable(QTableWidget):
         self.verticalHeader().setDefaultSectionSize(26)
         self.setMinimumHeight(220)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        install_copy(self, extra=lambda menu, _index: (
+            menu.addSeparator(),
+            menu.addAction("Paste from clipboard (replaces the table)",
+                           lambda: self.pasted.emit(QGuiApplication.clipboard().text()))))
 
     def keyPressEvent(self, e) -> None:
         if e.matches(QKeySequence.StandardKey.Paste):
@@ -278,8 +287,11 @@ class FetchPage(QWidget):
         self.means.itemChanged.connect(self._means_edited)
         self.allcols = self._readonly_table()
         self.matching = self._readonly_table()
+        install_copy(self.means, skip_columns=(0,))  # not the "Save" tick boxes
         for w in (self.means, self.allcols, self.matching):
             self.stack.addWidget(w)
+        for w in (self.allcols, self.matching):
+            install_copy(w)
         self.switch.changed.connect(self.stack.setCurrentIndex)
         lay.addWidget(self.stack)
         self.save_notice = Notice("", "success")
@@ -439,10 +451,11 @@ class FetchPage(QWidget):
         rows = self.c.rows
         complete = sum(1 for r in rows if all(r.sample.found.values()))
         to_save = len(self.c.rows_to_save())
-        problems = sum(1 for r in rows if r.problems or r.sample.notes)
+        states = [r.state for r in rows]
         self.results_summary.setText(
-            f"{plural(len(rows), 'accession')} · {complete} found in every file · "
-            f"{plural(problems, 'row')} to check (orange; Show › To check lists them) · {to_save} ticked to save")
+            f"{plural(len(rows), 'accession')} · {states.count('pass')} pass (green) · "
+            f"{states.count('fail')} fail (red) · {states.count('check')} to check (yellow; Show › To check "
+            f"lists them) · {complete} found in every file · {to_save} ticked to save")
         self.fetch_status.setText(f"Fetched {plural(len(rows), 'accession')}")
         self._fill_means()
         self._fill_all()
@@ -452,7 +465,7 @@ class FetchPage(QWidget):
         self.save_button.setToolTip("" if self.c.paths.get("template") else "Choose the MeaNS upload template first")
 
     def row_matches(self, row, mode: int, text: str) -> bool:
-        if mode == 1 and not (row.problems or row.sample.notes):
+        if mode == 1 and row.state != "check":
             return False
         if mode == 2 and all(row.sample.found.values()):
             return False
@@ -467,7 +480,7 @@ class FetchPage(QWidget):
     def apply_row_filter(self) -> None:
         """Show only the rows of the chosen kind (and matching the search) in all three views."""
         rows = self.c.rows
-        counts = [len(rows), sum(1 for r in rows if r.problems or r.sample.notes),
+        counts = [len(rows), sum(1 for r in rows if r.state == "check"),
                   sum(1 for r in rows if not all(r.sample.found.values())), sum(1 for r in rows if r.include)]
         self.row_filter.setLabels([f"{name} {n}" for name, n in zip(ROW_FILTERS, counts)])
         mode, text = self.row_filter.index(), self.row_search.text().strip().casefold()
@@ -482,7 +495,6 @@ class FetchPage(QWidget):
 
     def _fill_means(self) -> None:
         self._filling = True
-        t = current()
         cols = self.c.columns
         table = self.means
         table.clear()
@@ -492,25 +504,39 @@ class FetchPage(QWidget):
             item = table.horizontalHeaderItem(i)
             item.setToolTip(COMPUTED.get(col, "MeaNS column" if col in MEANS_COLUMNS else "From the source files"))
         table.setRowCount(len(self.c.rows))
-        warn = QBrush(t.c("warn.bg"))
         for r, row in enumerate(self.c.rows):
             check = QTableWidgetItem()
             check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             check.setCheckState(Qt.CheckState.Checked if row.include else Qt.CheckState.Unchecked)
             table.setItem(r, 0, check)
-            notes = [*row.problems, *row.sample.notes]
             for c, col in enumerate(cols, 1):
                 item = QTableWidgetItem(tables.as_text(self.c.value(row, col)))
-                tip = row.sources.get(col, "")
                 if col not in MEANS_COLUMNS:
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if notes:
-                    item.setBackground(warn)
-                    tip = "\n".join(filter(None, [tip, *notes]))
-                item.setToolTip(tip)
                 table.setItem(r, c, item)
+            self._color_row(r)
         table.resizeColumnsToContents()
         self._filling = False
+
+    def _color_row(self, r: int) -> None:
+        """Green for PASS, red for FAIL, yellow for a row to check; the tooltip says why."""
+        filling, self._filling = self._filling, True
+        row, table = self.c.rows[r], self.means
+        state = row.state
+        brush = QBrush(current().c(ROW_COLORS[state]))
+        why = [*row.problems, *row.sample.notes]
+        if state == "check" and not why:
+            why = ["no genotype in the genotyping table"]
+        status = STATE_TIPS[state] + (": " + "; ".join(why) if state == "check" else "")
+        for c in range(table.columnCount()):
+            item = table.item(r, c)
+            if item is None:
+                continue
+            item.setBackground(brush)
+            col = self.c.columns[c - 1] if c else ""
+            notes = why if state != "check" else []
+            item.setToolTip("\n".join(filter(None, [status, row.sources.get(col, ""), *notes])))
+        self._filling = filling
 
     def _fill_all(self) -> None:
         cols = self.c.all_columns()
@@ -572,6 +598,8 @@ class FetchPage(QWidget):
             row.include = text.lower() in ("yes", "y")
         if col in NAME_INPUTS or col == "WHO Strain Name":
             self.c.regenerate_names()
+        elif col == "Genotype":
+            self._color_row(item.row())
 
     def choose_columns(self) -> None:
         dialog = ColumnsDialog(self.c.columns, self.c.all_columns(), self)
