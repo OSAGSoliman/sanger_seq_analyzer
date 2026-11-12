@@ -27,6 +27,10 @@ sanger-seq-gui = "sanger_seq_analyzer.gui:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# the server's pages, styles and scripts (not Python files, so listed here)
+sanger_seq_analyzer = ["server/templates/*.html", "server/static/*"]
+
 [tool.pytest.ini_options]
 # Print every thread's stack if a test runs this long (finds hangs on CI machines).
 faulthandler_timeout = 300

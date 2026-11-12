@@ -175,3 +175,18 @@ def test_config_accepts_a_byte_order_mark(tmp_path):
     (data / "config.toml").write_bytes("﻿port = 9443\ntls_cert = \"certs/a.crt\"\n".encode("utf-8"))
     cfg = config.load(data)
     assert cfg.port == 9443 and cfg.tls_cert == str(data / "certs/a.crt")
+
+
+def test_package_data_covers_every_server_file():
+    """pip installs (Docker) only get the non-Python files listed in pyproject.toml."""
+    import fnmatch
+    import tomllib
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    globs = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"]["package-data"][
+        "sanger_seq_analyzer"]
+    pkg = root / "src" / "sanger_seq_analyzer"
+    for f in (pkg / "server").rglob("*"):
+        if f.is_file() and f.suffix not in (".py", ".pyc") and "__pycache__" not in f.parts:
+            rel = f.relative_to(pkg).as_posix()
+            assert any(fnmatch.fnmatch(rel, g) for g in globs), rel
