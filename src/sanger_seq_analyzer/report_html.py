@@ -80,7 +80,8 @@ def _header(result: RunResult) -> str:
 
 
 def _count_badge(status: str, n: int) -> str:
-    return f'<span class="badge big b-{status}">{ICONS[status]}{n} {status}</span>'
+    return (f'<button type="button" class="badge big b-{status} countf" data-filter="{status}" '
+            f'title="Show only {status} samples (click again for all)">{ICONS[status]}{n} {status}</button>')
 
 
 def _rules(s: QCSettings) -> str:
@@ -123,7 +124,9 @@ def _summary(result: RunResult, ids: dict[str, str]) -> str:
     tools = ('<div class="tools"><input id="filter-text" type="search" placeholder="Filter samples" '
              'aria-label="Filter samples"><select id="filter-status" aria-label="Status"><option value="">All</option>'
              '<option value="PASS">Pass</option><option value="FAIL">Fail</option></select>'
-             '<span class="hint">Click a column title to sort.</span></div>')
+             '<span class="hint" id="filter-count"></span>'
+             '<span class="hint">Click a column title to sort. The filter also hides the sample sections below.</span>'
+             '</div>')
     return (f'<section class="card summary" aria-label="Sample summary">{tools}<table class="st" id="summary">'
             f'<thead><tr>{th}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
             f'<div class="foot hint">{" · ".join(groups)}</div></section>')
@@ -322,7 +325,8 @@ def _sample(sr: SampleResult, result: RunResult, sid: str, viewers: dict) -> str
         summary = (f"Consensus (FASTA) · {c.length} bp" if c.status == "PASS"
                    else f"Assembly (not exported: sample failed) · {c.length} bp")
         fasta = f'<details><summary>{e(summary)}</summary><div class="in"><pre>{e(fasta)}</pre></div></details>'
-    return (f'<section class="card sample" id="{sid}" aria-label="{e(sr.sample)}"><div class="shead">'
+    return (f'<section class="card sample" id="{sid}" data-status="{c.status}" aria-label="{e(sr.sample)}">'
+            f'<div class="shead">'
             f'<h2>{e(sr.sample)}</h2>{badge(c.status, big=True)}<span class="sub">{included}</span>'
             f'<span class="grow"></span>{flagged}</div>{_reason_box(sr, s)}'
             f'{_tiles(sr, s, len(result.reference))}{_alignment(sr, data, s, anchors)}{"".join(reads)}{fasta}'

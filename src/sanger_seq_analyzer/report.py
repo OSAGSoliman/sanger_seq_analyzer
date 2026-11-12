@@ -83,14 +83,15 @@ def write_sample_summary(result: RunResult, fh: TextIO) -> None:
     w = csv.writer(fh)
     w.writerow(["sample", "status", "length", "ref_start", "ref_end", "mixtures", "mixture_pct", "N",
                 "marks", "max_single_coverage_run", "stop_codons", "indels",
-                "forward_status", "reverse_status", "reasons"])
+                "forward_status", "reverse_status", "reasons", "automated_status", "reviewed"])
     for s in result.samples:
         c = s.consensus
         w.writerow([s.sample, c.status, c.length, c.ref_start or "", c.ref_end or "", c.mixtures,
                     f"{c.mixture_fraction * 100:.2f}", c.n_count, c.marks, c.max_single_run,
                     " ".join(map(str, c.stop_codons)), "; ".join(c.indels),
                     c.forward.status if c.forward else "MISSING",
-                    c.reverse.status if c.reverse else "MISSING", "; ".join(c.reasons)])
+                    c.reverse.status if c.reverse else "MISSING", "; ".join(c.reasons),
+                    s.auto_status or c.status, "yes" if s.review else "no"])
 
 
 def write_read_qc(result: RunResult, fh: TextIO) -> None:
@@ -148,6 +149,8 @@ def run_info(result: RunResult) -> dict:
         "reverse_tags": list(result.reverse_tags),
         "settings": dataclasses.asdict(result.settings),
         "counts": {"samples": len(result.samples), "pass": result.count("PASS"), "fail": result.count("FAIL")},
+        "reviews": [{"sample": s.sample, "automated_status": s.auto_status, "reviewer_status": s.review}
+                    for s in result.samples if s.review],
         "planned_samples": result.planned,
         "files_not_analysed": [{"path": str(s.path), "reason": s.reason, "detail": s.text} for s in result.skipped],
         "errors": dict(result.errors),

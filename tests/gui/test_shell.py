@@ -23,8 +23,8 @@ def test_window_opens_and_closes_without_warnings(qapp, tmp_path):
     previous = qInstallMessageHandler(handler)
     try:
         w = make_window(tmp_path / "s.ini")
-        assert w.windowTitle().startswith("Sanger Seq Analyzer 0.3")
-        assert [t.text() for t in w.tabs.values()] == ["Run", "Results", "Settings"]
+        assert w.windowTitle().startswith("Sanger Seq Analyzer 0.4")
+        assert [t.text() for t in w.tabs.values()] == ["Run", "Results", "Fetch data", "Settings"]
         assert not w.tabs["results"].isEnabled()
         close_window(w, qapp)
     finally:

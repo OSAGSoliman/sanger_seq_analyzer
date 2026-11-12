@@ -1,4 +1,4 @@
-"""The QC tool: Run, Results and Settings pages around one :class:`QcController`."""
+"""The QC tool: Run, Results, Fetch data and Settings pages around one :class:`QcController`."""
 
 from __future__ import annotations
 
@@ -35,8 +35,12 @@ class QcTool(ToolUI):
         self.run_page = RunPage(c)
         self.results = ResultsPage(c)
         self.settings = SettingsPage(c)
+        from ..fetch import FetchController, FetchPage
+        self.fetch_controller = FetchController(store, self)
+        self.fetch = FetchPage(self.fetch_controller, c)
         self.results.restore_view_options()
         self.run_page.setup.runRequested.connect(self.start_run)
+        self.run_page.setup.clearRequested.connect(self.clear_all)
         self.run_page.setup.editSettings.connect(lambda: self.pageRequested.emit("settings"))
         self.results.newRunRequested.connect(lambda: self.pageRequested.emit("run"))
         self.results.exportRequested.connect(self.export)
@@ -46,6 +50,7 @@ class QcTool(ToolUI):
         c.runFinished.connect(self._run_finished)
         c.runFailed.connect(self._run_failed)
         c.inputsChanged.connect(self._update_context)
+        c.cleared.connect(self._cleared)
         self._actions = self._make_actions()
         c.validityChanged.connect(self._update_actions)
         self._update_actions()
@@ -54,7 +59,7 @@ class QcTool(ToolUI):
 
     def pages(self):
         return [("run", "Run", self.run_page), ("results", "Results", self.results),
-                ("settings", "Settings", self.settings)]
+                ("fetch", "Fetch data", self.fetch), ("settings", "Settings", self.settings)]
 
     def start(self) -> None:
         """Called once the shell has created the tabs."""
@@ -150,6 +155,28 @@ class QcTool(ToolUI):
 
     def _run_failed(self, message: str, details: str) -> None:
         self.run_page.setup.show_notice(f"The analysis stopped with an error: {message}", "error", details)
+
+    def clear_all(self) -> None:
+        c = self.controller
+        if c.running:
+            return
+        if c.result is not None:
+            reviewed = len(c.reviews)
+            extra = f" and your review of {plural(reviewed, 'sample')}" if reviewed else ""
+            answer = QMessageBox.question(self.window, "Clear", f"Clear the inputs, the results{extra}? Output "
+                                          "files already written stay on disk. Rules, reference and filename tags "
+                                          "are kept.")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        c.clear_all()
+
+    def _cleared(self) -> None:
+        self.run_page.show_setup()
+        self.run_page.setup.hide_notice()
+        self.results.hide_notice()
+        self.pageEnabledChanged.emit("results", False)
+        self._update_context()
+        self._update_actions()
 
     def export(self) -> None:
         if self.controller.result is None:

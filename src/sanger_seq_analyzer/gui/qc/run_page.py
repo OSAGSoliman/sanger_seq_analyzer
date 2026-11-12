@@ -112,6 +112,7 @@ class SetupView(QWidget):
     """The setup form (inputs, reference, output) and the rules card."""
 
     runRequested = Signal()
+    clearRequested = Signal()
     editSettings = Signal()
 
     def __init__(self, controller: QcController, parent=None):
@@ -179,8 +180,12 @@ class SetupView(QWidget):
         fl.setSpacing(14)
         self.run_button = button("Run analysis", "primary", icon_name="play", size="large")
         self.run_button.clicked.connect(self.runRequested.emit)
+        self.clear_button = button("Clear", icon_name="reset", size="large",
+                                   tooltip="Clear the inputs, output folder, results and reviews (settings are kept)")
+        self.clear_button.clicked.connect(self.clearRequested.emit)
         self.status = label("", "secondary", wrap=True)
         fl.addWidget(self.run_button)
+        fl.addWidget(self.clear_button)
         fl.addWidget(self.status, 1)
         lay.addWidget(footer)
         return frame
@@ -464,6 +469,8 @@ class SetupView(QWidget):
     def refresh_footer(self) -> None:
         reason = self.c.run_blocked_reason()
         self.run_button.setEnabled(not reason and not self.c.running)
+        self.clear_button.setEnabled(not self.c.running and bool(self.c.inputs or self.c.result is not None
+                                                                 or self.c.output_dir))
         self.input_field.setInvalid(bool(self.c.inputs) and any(f == "inputs" for f, _ in self.c.problems()))
         if reason:
             self.status.setText(reason)

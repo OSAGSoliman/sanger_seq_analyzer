@@ -11,7 +11,7 @@ added next to it.
 
 ## The desktop window
 
-Start it with `sanger-seq-gui` (or the `SangerSeqAnalyzer` app). It has three pages:
+Start it with `sanger-seq-gui` (or the `SangerSeqAnalyzer` app). It has four pages:
 
 - **Run.** Choose the folder with `.ab1` files (or drop a folder or files onto the window; *Add
   files…* adds single files). A summary shows how the files were paired, which samples have only
@@ -19,7 +19,12 @@ Start it with `sanger-seq-gui` (or the `SangerSeqAnalyzer` app). It has three pa
   its forward and reverse file. Choose the reference (`measles-n450` is preselected, *Custom
   FASTA…* adds your own) and the output folder, then **Run analysis**. The analysis runs in the
   background with a progress bar and can be cancelled; nothing is written for a cancelled run.
+  **Clear** (next to *Run analysis*) empties the inputs, output folder, results and reviews;
+  the reference, rules and filename tags are kept.
   *Load example data* appears when the bundled examples are available.
+  Files named `<accession>_214.ab1` and `<accession>_216.ab1` pair without any setting: 214 and
+  216 are the WHO N-450 primers MeV214 (forward) and MeV216 (reverse), and the sample name is
+  the accession (`02SV260016292_214.ab1` + `02SV260016292_216.ab1` → `02SV260016292`).
 - **Results.** The summary strip shows the PASS/FAIL counts, the reference and whether the rules
   were changed. The sample list can be searched (by name, reason or failure type), filtered by
   status and sorted. For the selected sample you see the verdict with every reason in plain
@@ -34,14 +39,65 @@ Start it with `sanger-seq-gui` (or the `SangerSeqAnalyzer` app). It has three pa
   reference orientation (right-click > *Show as sequenced* turns this off). Keys: Up/Down
   change sample, Left/Right move one position (Shift = 10, Ctrl = one codon), `[` and `]` jump to
   the previous/next flagged position, Ctrl/Cmd + wheel zooms the traces.
+  **Review:** *Confirm PASS* / *Confirm FAIL* records your decision for the sample (right-click
+  in the list does the same; *Undo* forgets it). A decision that differs from the rules overrides
+  the status in every export and is marked `✓ PASS*` in the list; *Confirm all…* confirms every
+  sample not reviewed yet with the status the rules gave. Tick *Go to next sample after
+  confirming* to review a plate quickly.
+- **Fetch data.** Links genotyping results to the lab's spreadsheets and prepares the MeaNS
+  upload rows (see [Fetch data](#fetch-data) below).
 - **Settings.** Every rule, with its default; changed values are marked and can be reset one by
   one or all together. Settings apply to the next run; results computed with other settings are
   labelled as such until you run again.
 
-**Export…** (Results page) writes any of the output files to a folder of your choice. By default
+**Export…** (Results page) writes any of the output files to a folder of your choice, for
+**all samples**, **PASS only**, **FAIL only** or **chosen samples** (PASS/FAIL after review).
+`sample_summary.csv` keeps the status the rules gave (`automated_status`) and whether the sample
+was reviewed; `run_info.json` lists every review. By default
 the files are also written to `<input folder>/sanger_results` when a run finishes. Settings,
 folders and the window layout are remembered between sessions (*Help > Restore factory
 settings* clears them).
+
+## Fetch data
+
+1. **Source files** (chosen once, remembered, read again when they change):
+   - *Measles and Rubella Positive Masterlist*: matched on `ACCESSION`;
+   - *Measles daily sheet*: every sheet with the header is combined; matched on
+     `MRN (reporting facility)` (the MRN from the masterlist);
+   - *MOHAP line list*: matched on `LabID` (tried against the masterlist `LAB ID`, then the daily
+     sheet `Lab ID #`, the accession and the daily sheet `Unique Identifier`); a data-dictionary
+     sheet is ignored;
+   - *MeaNS upload template*: the WHO strain names already used.
+
+   The header row is found even below titles, and column names are compared without case,
+   spaces and punctuation; IDs are compared without spaces, dashes and leading zeros
+   (`L-5001` = `l 5001`, `0100003` = `100003`). Use `.xlsx`, `.xlsm` or `.csv` (save old `.xls`
+   files as `.xlsx`).
+2. **Genotyping results**: paste the table copied from Excel (with its header: SN, Accession,
+   PCR Result, ct value, Genotyping Result, COMMENTS, FINAL), load it from a file, or press
+   *Use QC results* to start from the run (PASS, or FAIL REINJECT FORWARD/REVERSE/BOTH STRANDS).
+   Cells can be edited.
+3. **Fetch patient data** shows three views: the **MeaNS table** (editable), **All columns** (every
+   column of every file for each patient) and **Matching** (which file each accession was found in,
+   and how). Rows to check are orange. *Columns…* chooses and orders the columns (MeaNS columns
+   by default).
+
+MeaNS columns come from the line list first, then the masterlist and daily sheet (the tooltip of
+each cell says where it came from). *TAT* is the number of days from the receiving date to today;
+*to upload?* is Yes when the row has a genotype and its comments do not say FAIL.
+
+**WHO strain name**: `MVs/<Admin Level 1>.ARE/<ISO week>.<yy>/<n>` (RVs for rubella), using the
+onset date (the collection date when there is none). The number continues after the highest one
+already in the template for the same city and week (none for the first, then `/2`, `/3`…).
+Al Ain and Al Dhafra are written as Abu Dhabi, Ras Al Khaimah as RAK. Editing Admin Level 1 or a
+date renames the row; a name you type yourself is kept.
+
+**Save to MeaNS template…** appends the ticked rows below the last row of the template, after a
+confirmation, copying the format of the cells above. A copy of the template is saved first in a
+`MeaNS backups` folder next to it; rows whose accession or strain name is already in the template
+are skipped, and the template must be closed in Excel. The next fetch numbers after the rows just
+saved. *Export to Excel…* writes the MeaNS table, all columns and the matching report to a new
+workbook.
 
 ## Rules
 
@@ -148,7 +204,7 @@ to convert to N codons, add 375 to the codon number.
 | File | Contents |
 |---|---|
 | `consensus.fasta` | consensus of every PASS sample, oriented to the reference |
-| `report.html` | report to open in a browser (no internet needed): summary cards, a sortable and filterable sample table, the rules used, and per sample the verdict and reasons, metrics, the alignment against the reference and a chromatogram of every read. Clicking a base in the alignment scrolls the chromatograms to it. Prints one sample per page |
+| `report.html` | report to open in a browser (no internet needed): summary cards, a sortable and filterable sample table (the PASS/FAIL badges and the filter also hide the sample sections below, and printing prints only the samples shown), the rules used, and per sample the verdict and reasons, metrics, the alignment against the reference and a chromatogram of every read. Clicking a base in the alignment scrolls the chromatograms to it. Prints one sample per page |
 | `sample_summary.csv` | one row per sample: status, length, reference span, mixtures, Ns, marks, stop codons, indels, reasons |
 | `read_qc.csv` | one row per read: % bases ≥ Q20, mean QV, trim positions, strand, alignment to reference |
 | `marks.csv` | every marked position and why it was marked |
@@ -246,7 +302,9 @@ python packaging/build.py                # PyInstaller builds in dist/ (needs ".
 | `design_tokens.py` | colours and type scale shared by the window and the report |
 | `report.py`, `report_html.py`, `report_assets.py` | output files; the HTML report and its CSS/JavaScript |
 | `cli.py` | `sanger-seq` commands. Add new tools here as subcommands |
-| `gui/` | desktop window (PySide6). `gui/tools.py` registers tools; `gui/qc/` is the QC tool |
+| `review.py` | reviewer decisions (confirm PASS/FAIL) and export scope (all, PASS, FAIL, chosen samples) |
+| `fetch/` | Fetch data: spreadsheet reading (`tables.py`), linking and MeaNS columns (`linking.py`), WHO strain names (`strains.py`), writing to the template (`template.py`) |
+| `gui/` | desktop window (PySide6). `gui/tools.py` registers tools; `gui/qc/` is the QC tool, `gui/fetch/` the Fetch data page |
 | `simulate.py` | simulated chromatograms and an ABIF writer, used for the examples and tests |
 
 CI runs the tests on Windows, macOS and Linux (Python 3.12 and 3.13), checks that the command
@@ -257,10 +315,9 @@ publishes a release.
 ### Not yet
 
 Planned but not in this version: recent-folder list, manual pairing override, folder watching,
-filename tag presets (for example primer names), display offsets for genome or codon numbering,
+display offsets for genome or codon numbering,
 a reference library, named settings presets, re-running a single sample, run notifications,
-a failure breakdown by rule, plate charts, column choice in the sample list, exporting only
-selected samples, reviewer notes, horizontal alignment mode, amino-acid row, go-to-position,
+a failure breakdown by rule, plate charts, column choice in the sample list, reviewer notes, horizontal alignment mode, amino-acid row, go-to-position,
 alignment overview strip, copying an alignment range, per-channel trace toggles, chromatogram
 image export, instrument metadata, a quality plot per read, a "Reads" table, per-sample PDF,
 saving a run as a project, static print windows of the traces in the report, a report without

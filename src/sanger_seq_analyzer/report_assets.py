@@ -30,6 +30,7 @@ font-size:11px;font-weight:700;letter-spacing:.03em;white-space:nowrap;border:1p
 .badge.big{height:26px;border-radius:13px;font-size:13px;padding:0 12px 0 8px}.badge.big svg{width:14px;height:14px}
 .b-PASS{background:var(--pass-bg);color:var(--pass-fg);border-color:var(--pass-border)}
 .b-FAIL{background:var(--fail-bg);color:var(--fail-fg);border-color:var(--fail-border)}
+.countf{font-family:inherit;cursor:pointer}.countf[aria-pressed=true]{outline:2px solid currentColor;outline-offset:2px}
 .b-MISSING{background:var(--bg-window);color:var(--text-secondary);border-color:var(--border-default)}
 .chip{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font-size:11px;
 background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-border);margin-left:6px}
@@ -263,14 +264,31 @@ JS = r"""
   var table = document.getElementById("summary");
   if (table) {
     var body = table.tBodies[0], text = document.getElementById("filter-text"), status = document.getElementById("filter-status");
+    var counter = document.getElementById("filter-count");
     var filter = function () {
-      var q = (text.value || "").toLowerCase(), st = status.value;
+      var q = (text.value || "").toLowerCase(), st = status.value, shown = 0;
       Array.prototype.forEach.call(body.rows, function (r) {
         var ok = (!q || r.textContent.toLowerCase().indexOf(q) >= 0) && (!st || r.getAttribute("data-status") === st);
         r.style.display = ok ? "" : "none";
+        if (ok) { shown += 1; }
+        // the sample's own section (chromatograms, alignment) follows its summary row
+        var link = r.querySelector("a[href^='#']"), sec = link ? document.getElementById(link.getAttribute("href").slice(1)) : null;
+        if (sec) { sec.style.display = ok ? "" : "none"; }
+      });
+      if (counter) { counter.textContent = (q || st) ? "Showing " + shown + " of " + body.rows.length + " samples" : ""; }
+      Array.prototype.forEach.call(document.querySelectorAll(".countf"), function (b) {
+        b.setAttribute("aria-pressed", b.getAttribute("data-filter") === st ? "true" : "false");
       });
     };
     text.addEventListener("input", filter); status.addEventListener("change", filter);
+    Array.prototype.forEach.call(document.querySelectorAll(".countf"), function (b) {
+      b.addEventListener("click", function () {
+        var v = b.getAttribute("data-filter");
+        status.value = status.value === v ? "" : v;
+        filter();
+        table.scrollIntoView({behavior: "smooth", block: "start"});
+      });
+    });
     Array.prototype.forEach.call(table.tHead.rows[0].cells, function (th, k) {
       var btn = th.querySelector("button");
       if (!btn) { return; }

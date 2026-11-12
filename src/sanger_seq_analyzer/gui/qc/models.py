@@ -8,6 +8,7 @@ from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from ...pipeline import SampleResult
+from ...review import effective_status, review_label
 from ...presentation import AlignmentData, Column, failure_categories, rule_status, sample_subtitle
 from ...qc import QCSettings
 from ...recall import RuleResult
@@ -19,6 +20,8 @@ SampleRole = Qt.ItemDataRole.UserRole + 1
 SubtitleRole = Qt.ItemDataRole.UserRole + 2
 SortRole = Qt.ItemDataRole.UserRole + 3
 ColumnRole = Qt.ItemDataRole.UserRole + 4
+ReviewRole = Qt.ItemDataRole.UserRole + 5  # "", "confirmed" or "changed"
+StatusRole = Qt.ItemDataRole.UserRole + 6  # status after review
 
 SORTS = ("Status, then name", "Name", "Marks", "Mixtures", "Length")
 
@@ -30,6 +33,17 @@ class SampleListModel(QAbstractListModel):
         self.settings = QCSettings()
         self._subtitles: list[str] = []
         self._search: list[str] = []
+        self.reviews: dict[str, str] = {}  # the controller's reviewer decisions (shared dict)
+
+    def status(self, sr: SampleResult) -> str:
+        return effective_status(sr, self.reviews)
+
+    def review_changed(self, names: list[str]) -> None:
+        for name in names:
+            row = self.row_of(name)
+            if row >= 0:
+                index = self.index(row)
+                self.dataChanged.emit(index, index)
 
     def set_samples(self, samples: list[SampleResult], settings: QCSettings) -> None:
         self.beginResetModel()
@@ -51,12 +65,23 @@ class SampleListModel(QAbstractListModel):
         if role == SampleRole:
             return sr
         if role == SubtitleRole:
+            label = review_label(sr, self.reviews)
+            if label == "changed":
+                return f"Reviewer: {self.status(sr)} (rules: {sr.consensus.status}) · {self._subtitles[index.row()]}"
             return self._subtitles[index.row()]
+        if role == ReviewRole:
+            return review_label(sr, self.reviews)
+        if role == StatusRole:
+            return self.status(sr)
         if role == Qt.ItemDataRole.ToolTipRole:
             reasons = sr.consensus.reasons
-            return f"{sr.sample}: " + ("; ".join(reasons) if reasons else self._subtitles[index.row()])
+            text = f"{sr.sample}: " + ("; ".join(reasons) if reasons else self._subtitles[index.row()])
+            label = review_label(sr, self.reviews)
+            if label:
+                text += f"\nReviewer {'confirmed' if label == 'confirmed' else 'set'} {self.status(sr)}"
+            return text
         if role == Qt.ItemDataRole.AccessibleTextRole:
-            return f"{sr.sample}, {sr.consensus.status}, {self._subtitles[index.row()]}"
+            return f"{sr.sample}, {self.status(sr)}, {self._subtitles[index.row()]}"
         return None
 
     def search_text(self, row: int) -> str:
@@ -68,15 +93,15 @@ class SampleListModel(QAbstractListModel):
     def as_tsv(self) -> str:
         """The sample table as tab-separated text (EX-5)."""
         head = ["sample", "status", "length", "ref_start", "ref_end", "mixtures", "mixture_pct", "N", "marks",
-                "max_single_coverage_run", "forward", "reverse", "reasons"]
+                "max_single_coverage_run", "forward", "reverse", "reasons", "reviewed"]
         rows = ["\t".join(head)]
         for s in self.samples:
             c = s.consensus
             rows.append("\t".join(map(str, [
-                s.sample, c.status, c.length, c.ref_start or "", c.ref_end or "", c.mixtures,
+                s.sample, self.status(s), c.length, c.ref_start or "", c.ref_end or "", c.mixtures,
                 f"{c.mixture_fraction * 100:.2f}", c.n_count, c.marks, c.max_single_run,
                 c.forward.status if c.forward else "MISSING", c.reverse.status if c.reverse else "MISSING",
-                "; ".join(c.reasons)])))
+                "; ".join(c.reasons), "yes" if review_label(s, self.reviews) else "no"])))
         return "\n".join(rows) + "\n"
 
 
@@ -113,7 +138,7 @@ class SampleFilterProxy(QSortFilterProxyModel):
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
         model: SampleListModel = self.sourceModel()
         sr = model.samples[row]
-        if self.status and sr.consensus.status != self.status:
+        if self.status and model.status(sr) != self.status:
             return False
         return not self.text or self.text in model.search_text(row)
 
@@ -128,7 +153,7 @@ class SampleFilterProxy(QSortFilterProxyModel):
             return real, -c.mixtures, sr.sample.lower()
         if self.mode == 4:
             return real, -c.length, sr.sample.lower()
-        return (0 if c.status == "FAIL" else 1), sr.sample.lower()
+        return (0 if self.sourceModel().status(sr) == "FAIL" else 1), sr.sample.lower()
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
         model: SampleListModel = self.sourceModel()
@@ -151,9 +176,12 @@ class SampleDelegate(QStyledItemDelegate):
         elif option.state & QStyle.StateFlag.State_MouseOver:
             p.fillRect(rect, t.c("bg.hover"))
         p.fillRect(QRectF(rect.left(), rect.bottom(), rect.width(), 1), t.c("border.subtle"))
-        status = sr.consensus.status
+        status = index.data(StatusRole) or sr.consensus.status
         kind = "pass" if status == "PASS" else "fail"
         paint_disc(p, QRectF(rect.left() + 12, rect.center().y() - 10, 20, 20), kind)
+        reviewed = index.data(ReviewRole)
+        if reviewed:  # a confirmed sample shows a check before the status word; a changed one a star after it
+            status = f"✓ {status}{'*' if reviewed == 'changed' else ''}"
         word_font = ui_font(11, 700)
         word_font.setLetterSpacing(word_font.SpacingType.PercentageSpacing, 103)
         word_w = QFontMetrics(word_font).horizontalAdvance(status)

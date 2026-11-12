@@ -217,7 +217,7 @@ class SettingsPage(QWidget):
 
     def _tag_rows(self, grid: QGridLayout, row: int) -> int:
         for key, title, hint in (("forward_tags", "Forward filename tags",
-                                  "Comma-separated; matched after _ - . or a space"),
+                                  "Comma-separated, after _ - . or a space; 214 = MeV214 primer (02SV260016292_214)"),
                                  ("reverse_tags", "Reverse filename tags",
                                   "The sample name is everything before the last tag")):
             edit = QLineEdit()

@@ -8,10 +8,11 @@ from PySide6.QtCore import QModelIndex, QObject, QRectF, QSize, QSortFilterProxy
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLineEdit, QListView, QListWidget,
-    QListWidgetItem, QMenu, QPlainTextEdit, QScrollArea, QSizePolicy, QStackedWidget, QTableView, QToolButton,
+    QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QScrollArea, QSizePolicy, QStackedWidget, QTableView, QToolButton,
     QVBoxLayout, QWidget,
 )
 
+from ... import review
 from ...pipeline import RunResult, SampleResult
 from ...presentation import (
     fasta_text, metric_tiles, not_analysed_count, plural, reason_views, run_context, skipped_rows, verdict_sentence,
@@ -284,6 +285,22 @@ class SampleDetail(QWidget):
         header = hbox(self.name, self.badge, 4, self.verdict, self.copy, spacing=10)
         header.setStretch(3, 1)
         lay.addLayout(header)
+        # Reviewer decision: confirm the status, or change it; exports use the decision.
+        self.review_state = label("", "secondary")
+        self.review_state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.confirm_pass = button("Confirm PASS", size="small", icon_name="check",
+                                   tooltip="Mark this sample as PASS for export (overrides the rules)")
+        self.confirm_fail = button("Confirm FAIL", size="small", icon_name="cross",
+                                   tooltip="Mark this sample as FAIL for export (overrides the rules)")
+        self.undo_review = button("Undo", "link", tooltip="Forget the decision for this sample")
+        self.auto_next = QCheckBox("Go to next sample after confirming")
+        self.confirm_pass.clicked.connect(lambda: self._review("PASS"))
+        self.confirm_fail.clicked.connect(lambda: self._review("FAIL"))
+        self.undo_review.clicked.connect(lambda: self._review(None))
+        review_row = hbox(label("Review", "caps"), self.confirm_pass, self.confirm_fail, 6, self.review_state,
+                          self.undo_review, self.auto_next, spacing=8)
+        review_row.setStretch(4, 1)
+        lay.addLayout(review_row)
         self.reasons = ReasonBox()
         lay.addWidget(self.reasons)
         self.metrics = MetricStrip()
@@ -319,7 +336,7 @@ class SampleDetail(QWidget):
         settings = result.settings
         c = sr.consensus
         self.name.setText(sr.sample)
-        self.badge.set("pass" if c.status == "PASS" else "fail")
+        self.refresh_review()
         self.verdict.setText(verdict_sentence(sr))
         self.verdict.setToolTip(verdict_sentence(sr))
         self.copy.setText("Copy consensus FASTA" if c.status == "PASS" else "Copy assembly FASTA")
@@ -335,6 +352,32 @@ class SampleDetail(QWidget):
             self.selection.set(first)
         else:
             self.chrom.select_column(None)
+
+    reviewed = Signal(str, object)  # sample, "PASS" / "FAIL" / None
+
+    def refresh_review(self) -> None:
+        """Badge and review bar for the reviewer's decision on the shown sample."""
+        sr = self.sr
+        if sr is None:
+            return
+        status = self.c.status_of(sr)
+        self.badge.set("pass" if status == "PASS" else "fail")
+        state = review.review_label(sr, self.c.reviews)
+        if state == "confirmed":
+            text = f"✓ Confirmed {status}"
+        elif state == "changed":
+            text = f"✓ Changed to {status} by reviewer (rules: {sr.consensus.status})"
+        else:
+            text = f"Not reviewed · rules: {sr.consensus.status}"
+        self.review_state.setText(text)
+        self.review_state.setToolTip(text)
+        self.confirm_pass.setEnabled(self.c.reviews.get(sr.sample) != "PASS")
+        self.confirm_fail.setEnabled(self.c.reviews.get(sr.sample) != "FAIL")
+        self.undo_review.setVisible(bool(state))
+
+    def _review(self, status) -> None:
+        if self.sr is not None:
+            self.reviewed.emit(self.sr.sample, status)
 
     def _selected(self, column) -> None:
         self.detail.alignment.set_selected(column)
@@ -401,6 +444,7 @@ class SampleListPanel(QWidget):
         self.setProperty("surface", True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.model = SampleListModel(self)
+        self.model.reviews = controller.reviews
         self.proxy = SampleFilterProxy(self)
         self.proxy.setSourceModel(self.model)
         lay = QVBoxLayout(self)
@@ -470,8 +514,7 @@ class SampleListPanel(QWidget):
     def set_run(self, run: RunResult) -> None:
         self.model.set_samples(run.samples, run.settings)
         self.proxy.sort(0)
-        n_pass, n_fail = run.count("PASS"), run.count("FAIL")
-        self.segments.setLabels([f"All {len(run.samples)}", f"Pass {n_pass}", f"Fail {n_fail}"])
+        self.refresh_counts()
         rows = skipped_rows(run)
         self.footer.setText(f"Files not analysed ({len(rows)})")
         self.files.clear()
@@ -481,6 +524,21 @@ class SampleListPanel(QWidget):
             item.setFont(ui_font(12))
             self.files.addItem(item)
         self._update_empty()
+
+    def refresh_counts(self) -> None:
+        run = self.c.result
+        if run is None:
+            return
+        n_pass, n_fail = review.count(run, self.c.reviews, "PASS"), review.count(run, self.c.reviews, "FAIL")
+        self.segments.setLabels([f"All {len(run.samples)}", f"Pass {n_pass}", f"Fail {n_fail}"])
+
+    def select_next(self) -> bool:
+        """Move to the next sample in list order; False at the end."""
+        row = self.view.currentIndex().row()
+        if 0 <= row < self.proxy.rowCount() - 1:
+            self.view.setCurrentIndex(self.proxy.index(row + 1, 0))
+            return True
+        return False
 
     def _update_footer_icon(self, open_: bool) -> None:
         themed_icon(self.footer, "chevron-up" if open_ else "chevron-down", "text.secondary", 14)
@@ -526,7 +584,7 @@ class SampleListPanel(QWidget):
         """The first failing sample in list order, else the first sample."""
         for r in range(self.proxy.rowCount()):
             sr = self.proxy.index(r, 0).data(SampleRole)
-            if sr.consensus.status == "FAIL":
+            if self.model.status(sr) == "FAIL":
                 self.view.setCurrentIndex(self.proxy.index(r, 0))
                 return
         if self.proxy.rowCount():
@@ -551,6 +609,11 @@ class SampleListPanel(QWidget):
         act.setEnabled(bool(sr.consensus.sequence))
         menu.addAction("Copy table (tab-separated)", lambda: clip.setText(self.model.as_tsv()))
         menu.addSeparator()
+        menu.addAction("Confirm PASS", lambda: self.c.set_review(sr.sample, "PASS"))
+        menu.addAction("Confirm FAIL", lambda: self.c.set_review(sr.sample, "FAIL"))
+        act = menu.addAction("Clear review", lambda: self.c.set_review(sr.sample, None))
+        act.setEnabled(sr.sample in self.c.reviews)
+        menu.addSeparator()
         for direction, label_text in (("F", "forward"), ("R", "reverse")):
             path = sr.path(direction)
             act = menu.addAction(f"Show {label_text} file in folder",
@@ -566,6 +629,7 @@ class SummaryStrip(QFrame):
     openReport = Signal()
     export = Signal()
     showFiles = Signal()
+    confirmAll = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -585,6 +649,10 @@ class SummaryStrip(QFrame):
         self.files.setProperty("variant", "flat")
         self.files.setCursor(Qt.CursorShape.PointingHandCursor)
         self.files.clicked.connect(self.showFiles.emit)
+        self.reviewed = label("", "secondary")
+        self.confirm_all = button("Confirm all…", icon_name="check",
+                                  tooltip="Confirm every sample not reviewed yet with the status the rules gave")
+        self.confirm_all.clicked.connect(self.confirmAll.emit)
         new_run = button("New run")
         new_run.clicked.connect(self.newRun.emit)
         self.report = button("Open report", icon_name="external")
@@ -599,12 +667,18 @@ class SummaryStrip(QFrame):
         lay.addWidget(self.context, 1)
         lay.addWidget(self.stale)
         lay.addWidget(self.files)
+        lay.addWidget(self.reviewed)
+        lay.addWidget(self.confirm_all)
         lay.addWidget(new_run)
         lay.addWidget(self.report)
         lay.addWidget(export)
 
-    def set_run(self, run: RunResult, stale: bool, report: Path | None) -> None:
-        n_pass, n_fail = run.count("PASS"), run.count("FAIL")
+    def set_run(self, run: RunResult, stale: bool, report: Path | None, reviews: dict | None = None) -> None:
+        reviews = reviews or {}
+        n_pass, n_fail = review.count(run, reviews, "PASS"), review.count(run, reviews, "FAIL")
+        n_reviewed = review.reviewed_count(run, reviews)
+        self.reviewed.setText(f"{n_reviewed} of {len(run.samples)} reviewed")
+        self.confirm_all.setEnabled(n_reviewed < len(run.samples))
         self.passed.set("pass", f"{n_pass} PASS")
         self.failed.set("fail", f"{n_fail} FAIL")
         self.total.setText(f"of {plural(len(run.samples), 'sample')}")
@@ -667,6 +741,9 @@ class ResultsPage(QWidget):
         self.summary.export.connect(self.exportRequested.emit)
         self.summary.openReport.connect(self.open_report)
         self.summary.showFiles.connect(self.list.open_files)
+        self.summary.confirmAll.connect(self.confirm_all)
+        self.detail.reviewed.connect(self._review)
+        controller.reviewsChanged.connect(self._reviews_changed)
         controller.settingsChanged.connect(self.refresh_summary)
         controller.exported.connect(lambda _paths: self.refresh_summary())
         self._restore()
@@ -685,6 +762,7 @@ class ResultsPage(QWidget):
         self.c.store.set("ui/matches_as_dots", self.detail.detail.dots.isChecked())
         self.c.store.set("ui/show_reads", self.detail.detail.reads.isChecked())
         self.c.store.set("ui/link_tracks", self.detail.chrom.link.isChecked())
+        self.c.store.set("ui/review_auto_next", self.detail.auto_next.isChecked())
 
     def restore_view_options(self) -> None:
         s = self.c.store
@@ -692,6 +770,7 @@ class ResultsPage(QWidget):
         self.detail.detail.dots.setChecked(s.get_bool("ui/matches_as_dots", False))
         self.detail.detail.reads.setChecked(s.get_bool("ui/show_reads", True))
         self.detail.chrom.link.setChecked(s.get_bool("ui/link_tracks", True))
+        self.detail.auto_next.setChecked(s.get_bool("ui/review_auto_next", False))
 
     def report_path(self) -> Path | None:
         paths = self.c.last_export or {}
@@ -717,7 +796,33 @@ class ResultsPage(QWidget):
 
     def refresh_summary(self) -> None:
         if self.c.result is not None:
-            self.summary.set_run(self.c.result, self.c.results_stale(), self.report_path())
+            self.summary.set_run(self.c.result, self.c.results_stale(), self.report_path(), self.c.reviews)
+
+    def _review(self, sample: str, status) -> None:
+        self.c.set_review(sample, status)
+        if status is not None and self.detail.auto_next.isChecked():
+            self.list.select_next()
+
+    def _reviews_changed(self, names: list[str]) -> None:
+        self.list.model.review_changed(names)
+        self.list.refresh_counts()
+        self.list._update_empty()
+        self.refresh_summary()
+        if self.detail.sr is not None and self.detail.sr.sample in names:
+            self.detail.refresh_review()
+
+    def confirm_all(self) -> None:
+        run = self.c.result
+        if run is None:
+            return
+        todo = len(run.samples) - review.reviewed_count(run, self.c.reviews)
+        if not todo:
+            return
+        answer = QMessageBox.question(self, "Confirm all", f"Confirm the {plural(todo, 'sample')} not reviewed yet "
+                                      "with the status the rules gave? Samples you already reviewed keep your "
+                                      "decision.")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.c.confirm_unreviewed()
 
     def open_report(self) -> None:
         path = self.report_path()

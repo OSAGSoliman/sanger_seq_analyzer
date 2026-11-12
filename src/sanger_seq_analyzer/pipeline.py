@@ -26,8 +26,12 @@ from .recall import DIRECTIONS, Reason, SampleCall, call_sample
 from .references import ReferenceInfo, from_sequence, resolve_reference
 from .references import get as get_builtin
 
-FORWARD_TAGS = ("F", "FWD", "FOR", "FORWARD")
-REVERSE_TAGS = ("R", "REV", "REVERSE")
+# 214 / 216 are the WHO measles N-450 primers MeV214 (forward) and MeV216 (reverse), so lab files named
+# "<accession>_214.ab1" and "<accession>_216.ab1" pair without changing any setting.
+FORWARD_TAGS = ("F", "FWD", "FOR", "FORWARD", "214", "MeV214")
+REVERSE_TAGS = ("R", "REV", "REVERSE", "216", "MeV216")
+# Defaults of earlier versions: remembered tag lists equal to one of these are upgraded to the current defaults.
+LEGACY_TAGS = ((("F", "FWD", "FOR", "FORWARD"), ("R", "REV", "REVERSE")),)
 AB1_SUFFIXES = (".ab1", ".abi", ".ab!")
 SYSTEM_FILES = {"thumbs.db", "desktop.ini"}
 SEPARATORS = "_-. "
@@ -83,6 +87,8 @@ class SampleResult:
     reverse_path: Path | None = None
     error: str | None = None  # traceback of an unexpected analysis error
     read_errors: dict[str, str] = field(default_factory=dict)  # direction -> why the file could not be read
+    review: str = ""  # reviewer's confirmed status ("PASS"/"FAIL"), set on exported copies (see review.py)
+    auto_status: str = ""  # status the rules gave, when ``review`` is set
 
     def chrom(self, direction: str) -> Chromatogram | None:
         return self.forward_chrom if direction == "F" else self.reverse_chrom

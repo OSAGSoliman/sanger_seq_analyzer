@@ -61,6 +61,7 @@ RULES: dict[str, tuple[str, str, str]] = {
     "single_coverage": ("Weak single-coverage run within limit", "recall", "Single coverage"),
     "low_quality": ("Every position has a usable read", "recall", "Low quality"),
     "internal_error": ("Analysis completed", "lab", "Analysis error"),
+    "review": ("Reviewer decision", "lab", "Changed by reviewer"),
 }
 
 

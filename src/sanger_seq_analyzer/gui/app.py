@@ -223,7 +223,15 @@ def self_test(outdir: Path) -> int:
                            "fail": result.count("FAIL"), "files": written, "errors": result.errors,
                            "export_error": c.last_export_error})
             expected = sorted(f.filename for f in EXPORT_FILES)
-            report["ok"] = (result.count("PASS"), result.count("FAIL")) == (3, 8) and written == expected
+            # Fetch data: an Excel round trip proves the spreadsheet reader is bundled
+            from ..fetch import linking, tables, template
+            book = template.write_workbook(Path(tmp) / "self_test.xlsx", [
+                ("MeaNS", list(linking.MEANS_COLUMNS), [["MVs/Dubai.ARE/1.26"] + [""] * 18])])
+            back = tables.read_table(book, "template", list(linking.MEANS_COLUMNS), "WHO Strain Name")
+            report["fetch"] = {"page": "fetch" in window.pages, "rows": len(back.rows)}
+            fetch_ok = report["fetch"] == {"page": True, "rows": 1}
+            report["ok"] = ((result.count("PASS"), result.count("FAIL")) == (3, 8) and written == expected
+                            and fetch_ok)
             window.close()
     except Exception as exc:  # the JSON is the only output a windowed build can give
         report["error"] = f"{type(exc).__name__}: {exc}"

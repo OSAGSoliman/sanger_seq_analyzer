@@ -14,7 +14,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
-from ...pipeline import FORWARD_TAGS, REVERSE_TAGS, ChromCache, RunResult, SampleResult, ScanResult, scan, \
+from ... import review
+from ...pipeline import FORWARD_TAGS, LEGACY_TAGS, REVERSE_TAGS, ChromCache, RunResult, SampleResult, ScanResult, scan, \
     validate_tags
 from ...presentation import AlignmentData, alignment
 from ...qc import QCSettings
@@ -43,6 +44,8 @@ class QcController(QObject):
     runFailed = Signal(str, str)
     exported = Signal(object)  # dict[str, Path]
     exportFailed = Signal(str)
+    reviewsChanged = Signal(list)  # names of the samples whose reviewer decision changed
+    cleared = Signal()  # inputs and results were cleared (Clear button)
 
     def __init__(self, store: Store, parent: QObject | None = None):
         super().__init__(parent)
@@ -62,6 +65,7 @@ class QcController(QObject):
         self.write_html = True
         self.scan_result: ScanResult | None = None
         self.result: RunResult | None = None
+        self.reviews: dict[str, str] = {}  # sample -> reviewer's confirmed "PASS"/"FAIL" for the shown result
         self.last_export: dict[str, Path] | None = None
         self.last_export_error = ""
         self.cache = ChromCache()
@@ -83,6 +87,8 @@ class QcController(QObject):
         for p in problems:
             log.warning("stored setting ignored: %s", p.message)
         tags_f, tags_r = tuple(s.get_list("qc/forward_tags")), tuple(s.get_list("qc/reverse_tags"))
+        if (tags_f, tags_r) in LEGACY_TAGS:
+            tags_f, tags_r = FORWARD_TAGS, REVERSE_TAGS  # old defaults: pick up the new 214/216 tags
         if tags_f and tags_r and not validate_tags(tags_f, tags_r):
             self.forward_tags, self.reverse_tags = tags_f, tags_r
         self.inputs = s.get_paths("run/inputs")
@@ -338,6 +344,7 @@ class QcController(QObject):
         if result is not None and not result.cancelled:
             self.result = result
             self._alignments = {}
+            self.reviews.clear()  # decisions belong to the result they were made on (dict shared with views)
         log.info("run finished: %s", "failed" if result is None else
                  f"{len(result.samples)} samples{' (cancelled)' if result.cancelled else ''}")
         self.validityChanged.emit()
@@ -360,6 +367,66 @@ class QcController(QObject):
         return (settings_to_dict(r.settings) != settings_to_dict(self.settings)
                 or (r.forward_tags, r.reverse_tags) != (self.forward_tags, self.reverse_tags))
 
-    def export(self, outdir: Path, keys: list[str]) -> dict[str, Path]:
-        """Write the chosen files for the current result (raises ExportError)."""
-        return write_outputs(self.result, outdir, files=keys)
+    # --- review (confirm PASS / FAIL) ---------------------------------------------------------------------
+
+    def set_review(self, names: list[str] | str, status: str | None) -> None:
+        """Confirm samples as "PASS"/"FAIL", or clear the decision with None."""
+        names = [names] if isinstance(names, str) else list(names)
+        changed = []
+        for name in names:
+            old = self.reviews.get(name)
+            if status in ("PASS", "FAIL"):
+                self.reviews[name] = status
+            else:
+                self.reviews.pop(name, None)
+            if self.reviews.get(name) != old:
+                changed.append(name)
+        if changed:
+            self.reviewsChanged.emit(changed)
+
+    def confirm_unreviewed(self) -> int:
+        """Confirm every sample not yet reviewed with the status the rules gave; returns how many."""
+        if self.result is None:
+            return 0
+        todo = [s for s in self.result.samples if s.sample not in self.reviews]
+        changed = [s.sample for s in todo]
+        for s in todo:
+            self.reviews[s.sample] = s.consensus.status
+        if changed:
+            self.reviewsChanged.emit(changed)
+        return len(changed)
+
+    def status_of(self, sr: SampleResult) -> str:
+        return review.effective_status(sr, self.reviews)
+
+    # --- clear ------------------------------------------------------------------------------------------
+
+    def clear_all(self) -> None:
+        """Forget the inputs, the output folder choice, the result and the reviews (Clear button).
+
+        The reference, rule settings and filename tags are kept: they are settings, not run data.
+        """
+        if self.running:
+            return
+        self.inputs = []
+        self.output_dir = ""
+        self.scan_result = None
+        self.result = None
+        self.reviews.clear()
+        self.last_export, self.last_export_error = None, ""
+        self._alignments = {}
+        self.save()
+        self.inputsChanged.emit()
+        self.scanChanged.emit()
+        self.outputChanged.emit()
+        self.validityChanged.emit()
+        self.cleared.emit()
+
+    def export(self, outdir: Path, keys: list[str], scope: str = "all", chosen=()) -> dict[str, Path]:
+        """Write the chosen files for the current result (raises ExportError).
+
+        ``scope`` limits the samples ("all", "pass", "fail" or "selected" with ``chosen``);
+        reviewer decisions are applied to what is written.
+        """
+        names = review.select(self.result, self.reviews, scope, chosen)
+        return write_outputs(review.apply(self.result, self.reviews, names), outdir, files=keys)
