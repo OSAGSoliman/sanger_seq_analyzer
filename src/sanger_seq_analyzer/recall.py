@@ -563,9 +563,12 @@ def _check_strands(result: SampleCall, s: QCSettings) -> RuleResult:
         result.fail("strands", f"forward and reverse reads align to the same strand ({by_dir['F']}): "
                                "duplicate or mislabelled file")
     if s.check_read_orientation:
-        if by_dir.get("F") == "-":
+        if by_dir.get("F") == "-" and by_dir.get("R") == "+":
+            result.fail("strands", "forward and reverse reads are swapped (the forward file aligns to the minus "
+                                   "strand, the reverse file to the plus strand)")
+        elif by_dir.get("F") == "-":
             result.fail("strands", "forward read aligns to the minus strand (expected plus)")
-        if by_dir.get("R") == "+":
+        elif by_dir.get("R") == "+":
             result.fail("strands", "reverse read aligns to the plus strand (expected minus)")
     failed = any(r.rule == "strands" for r in result.reason_items)
     return _rule("strands", observed, limit, None if not by_dir else not failed)

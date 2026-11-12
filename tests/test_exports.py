@@ -57,7 +57,7 @@ def test_run_info(tmp_path):
     assert len(info["reference"]["sha256"]) == 64
     assert info["counts"] == {"samples": 11, "pass": 3, "fail": 8}
     assert info["settings"]["min_good_fraction"] == 0.75 and info["settings"]["require_full_reference"] is True
-    assert info["forward_tags"] == ["F", "FWD", "FOR", "FORWARD", "214", "MeV214"]
+    assert info["forward_tags"] == ["F", "FWD", "FOR", "FORWARD", "216", "MeV216"]
     assert info["inputs"] == [str(EXAMPLES)]
 
 

@@ -26,12 +26,15 @@ from .recall import DIRECTIONS, Reason, SampleCall, call_sample
 from .references import ReferenceInfo, from_sequence, resolve_reference
 from .references import get as get_builtin
 
-# 214 / 216 are the WHO measles N-450 primers MeV214 (forward) and MeV216 (reverse), so lab files named
-# "<accession>_214.ab1" and "<accession>_216.ab1" pair without changing any setting.
-FORWARD_TAGS = ("F", "FWD", "FOR", "FORWARD", "214", "MeV214")
-REVERSE_TAGS = ("R", "REV", "REVERSE", "216", "MeV216")
+# 216 / 214 are the WHO measles N-450 primers MeV216 (forward: binds the plus strand at genome position 1104,
+# upstream of N-450) and MeV214 (reverse: binds the minus strand at 1718, downstream), so lab files named
+# "<accession>_216.ab1" and "<accession>_214.ab1" pair without changing any setting.
+FORWARD_TAGS = ("F", "FWD", "FOR", "FORWARD", "216", "MeV216")
+REVERSE_TAGS = ("R", "REV", "REVERSE", "214", "MeV214")
 # Defaults of earlier versions: remembered tag lists equal to one of these are upgraded to the current defaults.
-LEGACY_TAGS = ((("F", "FWD", "FOR", "FORWARD"), ("R", "REV", "REVERSE")),)
+# 0.4.0 had 214 and 216 the wrong way round.
+LEGACY_TAGS = ((("F", "FWD", "FOR", "FORWARD"), ("R", "REV", "REVERSE")),
+               (("F", "FWD", "FOR", "FORWARD", "214", "MeV214"), ("R", "REV", "REVERSE", "216", "MeV216")))
 AB1_SUFFIXES = (".ab1", ".abi", ".ab!")
 SYSTEM_FILES = {"thumbs.db", "desktop.ini"}
 SEPARATORS = "_-. "

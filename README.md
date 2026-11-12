@@ -22,9 +22,12 @@ Start it with `sanger-seq-gui` (or the `SangerSeqAnalyzer` app). It has four pag
   **Clear** (next to *Run analysis*) empties the inputs, output folder, results and reviews;
   the reference, rules and filename tags are kept.
   *Load example data* appears when the bundled examples are available.
-  Files named `<accession>_214.ab1` and `<accession>_216.ab1` pair without any setting: 214 and
-  216 are the WHO N-450 primers MeV214 (forward) and MeV216 (reverse), and the sample name is
-  the accession (`02SV260016292_214.ab1` + `02SV260016292_216.ab1` → `02SV260016292`).
+  Files named `<accession>_216.ab1` and `<accession>_214.ab1` pair without any setting: 216 and
+  214 are the WHO N-450 primers MeV216 (forward, binds upstream of N-450 on the plus strand) and
+  MeV214 (reverse, binds downstream on the minus strand), and the sample name is the accession
+  (`02SV260016292_216.ab1` + `02SV260016292_214.ab1` → `02SV260016292`). If both reads of a
+  sample align to the opposite strands, the sample fails with "forward and reverse reads are
+  swapped": check the filename tags in Settings.
 - **Results.** The summary strip shows the PASS/FAIL counts, the reference and whether the rules
   were changed. The sample list can be searched (by name, reason or failure type), filtered by
   status and sorted. For the selected sample you see the verdict with every reason in plain

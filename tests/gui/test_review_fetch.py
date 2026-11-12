@@ -88,28 +88,35 @@ def test_report_filter_hides_sample_sections(results_window, tmp_path):
     assert 'data-filter="PASS"' in html and "sec.style.display" in html
 
 
-def test_files_named_214_and_216_pair(window, tmp_path):
+def test_files_named_216_and_214_pair(window, tmp_path):
+    """216 = MeV216 forward, 214 = MeV214 reverse; the pair passes (reads on the expected strands)."""
     import shutil
-    for name, target in (("GOOD01_F", "02SV260016292_214"), ("GOOD01_R", "02SV260016292_216")):
+    for name, target in (("GOOD01_F", "02SV260016292_216"), ("GOOD01_R", "02SV260016292_214")):
         shutil.copy(EXAMPLES / "good" / f"{name}.ab1", tmp_path / f"{target}.ab1")
     c = window.tools[0].controller
     c.set_inputs([tmp_path])
     c.rescan_now()
     assert list(c.scan_result.pairs) == ["02SV260016292"]
-    assert set(c.scan_result.pairs["02SV260016292"]) == {"F", "R"}
+    assert c.scan_result.pairs["02SV260016292"]["F"].name == "02SV260016292_216.ab1"
+    assert c.scan_result.pairs["02SV260016292"]["R"].name == "02SV260016292_214.ab1"
+    run_examples(window, [tmp_path])
+    assert c.result.samples[0].consensus.status == "PASS", c.result.samples[0].consensus.reasons
 
 
-def test_stored_old_default_tags_pick_up_214_216(qapp, tmp_path):
+@pytest.mark.parametrize("old", [(["F", "FWD", "FOR", "FORWARD"], ["R", "REV", "REVERSE"]),
+                                 (["F", "FWD", "FOR", "FORWARD", "214", "MeV214"],
+                                  ["R", "REV", "REVERSE", "216", "MeV216"])])  # 0.4.0 had them swapped
+def test_stored_old_default_tags_are_upgraded(qapp, tmp_path, old):
     from guihelpers import close_window, make_window
 
     from sanger_seq_analyzer.gui.persist import Store
     store = Store(tmp_path / "s.ini")
-    store.set("qc/forward_tags", ["F", "FWD", "FOR", "FORWARD"])
-    store.set("qc/reverse_tags", ["R", "REV", "REVERSE"])
+    store.set("qc/forward_tags", old[0])
+    store.set("qc/reverse_tags", old[1])
     store.sync()
     w = make_window(tmp_path / "s.ini")
     c = w.tools[0].controller
-    assert "214" in c.forward_tags and "216" in c.reverse_tags
+    assert "216" in c.forward_tags and "214" in c.reverse_tags
     close_window(w, qapp)
 
 

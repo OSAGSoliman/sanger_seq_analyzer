@@ -88,7 +88,7 @@ class QcController(QObject):
             log.warning("stored setting ignored: %s", p.message)
         tags_f, tags_r = tuple(s.get_list("qc/forward_tags")), tuple(s.get_list("qc/reverse_tags"))
         if (tags_f, tags_r) in LEGACY_TAGS:
-            tags_f, tags_r = FORWARD_TAGS, REVERSE_TAGS  # old defaults: pick up the new 214/216 tags
+            tags_f, tags_r = FORWARD_TAGS, REVERSE_TAGS  # old defaults: pick up the 216 (F) / 214 (R) tags
         if tags_f and tags_r and not validate_tags(tags_f, tags_r):
             self.forward_tags, self.reverse_tags = tags_f, tags_r
         self.inputs = s.get_paths("run/inputs")

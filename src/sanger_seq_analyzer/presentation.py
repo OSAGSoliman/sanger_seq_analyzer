@@ -260,6 +260,10 @@ def reason_views(sr: SampleResult, s: QCSettings | None = None) -> list[ReasonVi
             if "same strand" in text:
                 view.explanation = ("Both files align to the same strand, so they are probably the same read "
                                     "twice or two reads from the same primer.")
+            elif "swapped" in text:
+                view.explanation = ("The file tagged forward reads the minus strand and the file tagged reverse "
+                                    "reads the plus strand: the forward/reverse filename tags are the wrong way "
+                                    "round for these files.")
             else:
                 view.explanation = f"The file named as {text.split()[0]} aligns in the opposite orientation."
             view.hint = ("Check the file names and the F/R tags in Settings. Turn off Check read orientation only "

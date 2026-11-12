@@ -94,7 +94,7 @@ def test_swapped_names_fail(tmp_path):
     shutil.copy(EXAMPLES / "good/GOOD01_R.ab1", tmp_path / "SWAP_F.ab1")
     _, c = call(tmp_path)
     assert c.status == "FAIL"
-    assert "forward read aligns to the minus strand (expected plus)" in c.reasons, c.reasons
+    assert len(c.reasons) == 1 and c.reasons[0].startswith("forward and reverse reads are swapped"), c.reasons
 
 
 def test_swapped_names_pass_without_orientation_check(tmp_path):
