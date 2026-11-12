@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QFontMetrics, QHelpEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
@@ -49,7 +49,7 @@ class MetricStrip(QWidget):
     def event(self, e) -> bool:
         if e.type() == QEvent.Type.ToolTip and isinstance(e, QHelpEvent):
             for tile, rect in zip(self.tiles, self._rects()):
-                if rect.contains(e.position()) and tile.tooltip:
+                if rect.contains(QPointF(e.pos())) and tile.tooltip:  # QHelpEvent has pos(), not position()
                     QToolTip.showText(e.globalPos(), tile.tooltip, self)
                     return True
             QToolTip.hideText()

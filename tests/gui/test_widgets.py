@@ -61,6 +61,39 @@ def test_metric_strip_wraps(qapp, example):
     assert strip.height() == 148
 
 
+def test_tooltips_of_custom_widgets(qapp, example, monkeypatch):
+    """Hovering shows a tooltip without an error (a QHelpEvent has pos(), not position())."""
+    from PySide6.QtCore import QEvent, QPoint
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QToolTip
+
+    from sanger_seq_analyzer.gui.widgets.alignment_view import AlignmentView
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *a, **k: shown.append(a[1]))
+    strip = MetricStrip()
+    strip.set_tiles(metric_tiles(example("BAD04"), S, 450))
+    strip.resize(1200, 74)
+    strip.show()
+    for rect in strip._rects():
+        c = rect.center().toPoint()
+        assert strip.event(QHelpEvent(QEvent.Type.ToolTip, c, strip.mapToGlobal(c)))
+    assert len(shown) == sum(1 for t in strip.tiles if t.tooltip) > 0
+    sr = example("BAD04")
+    view = AlignmentView()
+    view.set_data(alignment(sr, S), sr.consensus, S)
+    view.resize(900, 200)
+    view.show()
+    view.viewportEvent(QHelpEvent(QEvent.Type.ToolTip, QPoint(120, 40), view.mapToGlobal(QPoint(120, 40))))
+    track = ChromatogramTrack("F")
+    track.set_sample(sr, alignment(sr, S), S)
+    track.resize(900, 300)
+    track.show()
+    view_widget = track.view
+    view_widget.viewportEvent(QHelpEvent(QEvent.Type.ToolTip, QPoint(200, 150),
+                                         view_widget.mapToGlobal(QPoint(200, 150))))
+    assert len(shown) > sum(1 for t in strip.tiles if t.tooltip)  # the trace tooltip was shown too
+
+
 @pytest.mark.parametrize("name", NAMES)
 def test_every_read_paints(qapp, example, name):
     sr = example(name)
