@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Sanger Seq Analyzer{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Sign in</h1>
+  {% if first_run %}
+  <div class="notice info">No admin account exists yet. On the server, run<br><code>sanger-seq server create-admin --data &lt;data folder&gt;</code><br>then sign in here.</div>
+  {% endif %}
+  {% if request.query_params.get('changed') %}<div class="notice success">Password changed. Sign in with the new password.</div>{% endif %}
+  {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>User name <input name="username" value="{{ username }}" autocomplete="username" required autofocus></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="primary">Sign in</button>
+  </form>
+</section>
+{% endblock %}

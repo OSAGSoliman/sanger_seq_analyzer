@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Folders · Admin{% endblock %}
+{% block content %}
+{% include "_admin_nav.html" %}
+{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+<section class="card">
+  <div class="card-head"><h2>Shared folders the server can use</h2></div>
+  <p class="sub">Users pick files inside these folders by name; they never type a server path.
+  Use folders where the sequencer exports <code>.ab1</code> files, and the folders holding the masterlist, daily sheet,
+  line list and MeaNS template (choose which file is which under <a href="/fetch/sources">Fetch data › Source files</a>).
+  On Windows use UNC paths such as <code>\\fileserver\Virology\Measles</code>: the service cannot see mapped drive letters.</p>
+  {% if roots %}
+  <div class="tablewrap"><table class="grid">
+    <thead><tr><th>Name</th><th>Path</th><th>Server may write</th><th>Access</th><th></th></tr></thead>
+    <tbody>
+    {% for r in roots %}
+      <tr>
+        <td>{{ r.name }}</td><td class="mono">{{ r.path }}</td><td>{{ "yes" if r.writable else "no" }}</td>
+        <td>
+          {% if checks.get(r.id) %}{% for name, ok, detail in checks[r.id] %}
+            <div><span class="badge {{ 'b-PASS' if ok else 'b-FAIL' }}">{{ "OK" if ok else "No" }}</span> {{ name }} <span class="hint">{{ detail }}</span></div>
+          {% endfor %}{% else %}
+          <form method="post" action="/admin/folders/{{ r.id }}/check"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Check access</button></form>
+          {% endif %}
+        </td>
+        <td><form method="post" action="/admin/folders/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="hint">No folders yet. Users can still upload files from their PC.</p>{% endif %}
+</section>
+<section class="card">
+  <h2>Add a folder</h2>
+  <form method="post" action="/admin/folders" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Name <input name="name" required placeholder="e.g. Sequencer exports"></label>
+    <label style="flex:1">Path on the server <input name="path" required placeholder="\\fileserver\Virology\Sanger  or  /mnt/virology/sanger"></label>
+    <label class="inline" style="align-self:flex-end"><input type="checkbox" name="writable" value="1"> server may write here (MeaNS template folder)</label>
+    <button class="primary" style="align-self:flex-end">Add folder</button>
+  </form>
+</section>
+{% endblock %}

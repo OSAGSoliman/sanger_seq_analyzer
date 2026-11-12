@@ -158,7 +158,7 @@ def cmd_gui(args: argparse.Namespace) -> int:
         from .gui import main as gui_main
     except ImportError as exc:
         print(f"The desktop window is not included in this build ({exc}).\n"
-              "Install it with: pip install PySide6-Essentials", file=sys.stderr)
+              'Install it with: pip install "sanger_seq_analyzer[gui]"', file=sys.stderr)
         return 1
     return gui_main([])
 
@@ -183,6 +183,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("gui", help="open the desktop window")
     p.set_defaults(func=cmd_gui)
+
+    from .server.cli import add_parsers  # imports nothing heavy until a server command runs
+    add_parsers(sub)
     return parser
 
 

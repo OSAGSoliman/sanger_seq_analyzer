@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Audit log · Admin{% endblock %}
+{% block content %}
+{% include "_admin_nav.html" %}
+<section class="card">
+  <div class="card-head">
+    <h2>Audit log</h2>
+    {% if intact %}<span class="badge b-PASS">{{ checked }} entries, none changed</span>
+    {% else %}<span class="badge b-FAIL">Changed: {{ problem }}</span>{% endif %}
+    <span class="grow"></span>
+    <a class="button small" href="/admin/audit.csv?action={{ action|urlencode }}&user={{ who|urlencode }}&q={{ q|urlencode }}">Download CSV</a>
+  </div>
+  <form method="get" action="/admin/audit" class="row" style="margin-bottom:12px">
+    <label>Action <input name="action" value="{{ action }}" placeholder="e.g. review, template, login"></label>
+    <label>User <input name="user" value="{{ who }}"></label>
+    <label>Contains <input name="q" value="{{ q }}" placeholder="accession, run, strain name"></label>
+    <button style="align-self:flex-end">Filter</button>
+  </form>
+  <div class="tablewrap"><table class="grid">
+    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for r in rows %}<tr><td class="nowrap">{{ r.at | local("%d %b %Y %H:%M:%S") }}</td><td>{{ r.username }}</td><td class="mono">{{ r.action }}</td><td>{{ r.target }}</td><td class="mono hint">{{ r.details if r.details != '{}' else '' }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

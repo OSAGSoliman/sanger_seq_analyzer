@@ -1,10 +1,11 @@
-"""Build the desktop app and the command-line tool with PyInstaller.
+"""Build the desktop app, the command-line tool and the lab server with PyInstaller.
 
-    python packaging/build.py            # both
-    python packaging/build.py gui|cli    # one of them
+    python packaging/build.py               # desktop app and command line
+    python packaging/build.py gui|cli|server
 
 Outputs in dist/: SangerSeqAnalyzer/ (Windows, Linux) or SangerSeqAnalyzer.app (macOS),
-and the one-file sanger-seq executable. Run from the repository root.
+the one-file sanger-seq executable, and SangerSeqServer/ (needs the [server] extra).
+Run from the repository root.
 """
 
 from __future__ import annotations
@@ -54,6 +55,18 @@ def build_cli() -> None:
                               "--exclude-module", "tkinter", str(ROOT / "packaging/launcher_cli.py")])
 
 
+def build_server() -> None:
+    server = ROOT / "src/sanger_seq_analyzer/server"
+    PyInstaller.__main__.run([
+        "--noconfirm", "--clean", "--onedir", "--console", "--name", "SangerSeqServer",
+        "--add-data", f"{server / 'templates'}{SEP}sanger_seq_analyzer/server/templates",
+        "--add-data", f"{server / 'static'}{SEP}sanger_seq_analyzer/server/static",
+        "--collect-submodules", "uvicorn", "--collect-data", "tzdata",
+        "--hidden-import", "sanger_seq_analyzer.server.app",
+        "--exclude-module", "PySide6", "--exclude-module", "shiboken6", "--exclude-module", "tkinter",
+        str(ROOT / "packaging/launcher_server.py")])
+
+
 def minimum_macos() -> str:
     """Oldest macOS supported by the installed PySide6 wheel (from its platform tag)."""
     wheel = importlib.metadata.distribution("PySide6-Essentials").read_text("WHEEL") or ""
@@ -80,6 +93,8 @@ def main(argv: list[str]) -> int:
         build_gui()
     if "cli" in targets:
         build_cli()
+    if "server" in targets:
+        build_server()
     return 0
 
 

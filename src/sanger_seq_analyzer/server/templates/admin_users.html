@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Users · Admin{% endblock %}
+{% block content %}
+{% include "_admin_nav.html" %}
+{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+{% if shown_password %}
+<div class="notice success" role="status">
+  Temporary password for <b>{{ shown_password[0] }}</b>: <code id="temp-pw">{{ shown_password[1] }}</code>
+  <button class="small" type="button" data-copy-text="#temp-pw">Copy</button><br>
+  Give it to the user in person. It is shown only now; they choose their own password at first sign-in.
+</div>
+{% endif %}
+<section class="card">
+  <div class="card-head"><h2>Users</h2></div>
+  <div class="tablewrap">
+  <table class="grid">
+    <thead><tr><th>User name</th><th>Name</th><th>Role</th><th>Active</th><th>Created</th><th></th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td class="mono">{{ u.username }}</td>
+        <td colspan="3">
+          <form method="post" action="/admin/users/{{ u.id }}" class="row">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input name="display_name" value="{{ u.display_name }}" aria-label="Name of {{ u.username }}">
+            <select name="role" aria-label="Role of {{ u.username }}">
+              {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ role_names[r] }}</option>{% endfor %}
+            </select>
+            <label class="inline"><input type="checkbox" name="active" value="1"{% if u.active %} checked{% endif %}> active</label>
+            <button class="small">Save</button>
+          </form>
+        </td>
+        <td class="nowrap">{{ u.created_at | local("%d %b %Y") }}</td>
+        <td>{% if u.must_change %}<span class="badge b-warn">must set password</span>{% endif %}{% if u.locked_until %}<span class="badge b-FAIL">locked</span>{% endif %}</td>
+        <td>
+          <form method="post" action="/admin/users/{{ u.id }}/reset">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="small" title="Make a new temporary password">Reset password</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+<section class="card">
+  <h2>Add a user</h2>
+  <form method="post" action="/admin/users" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>User name <input name="username" required maxlength="40" pattern="[A-Za-z0-9._\-]+" placeholder="e.g. osoliman"></label>
+    <label>Name <input name="display_name" placeholder="e.g. Omar Soliman"></label>
+    <label>Role <select name="role">{% for r in roles %}<option value="{{ r }}"{% if r == 'analyst' %} selected{% endif %}>{{ role_names[r] }}</option>{% endfor %}</select></label>
+    <button class="primary" style="align-self:flex-end">Add user</button>
+  </form>
+  <ul class="hint">{% for r in roles %}<li><b>{{ role_names[r] }}</b> {{ role_help[r] }}</li>{% endfor %}</ul>
+</section>
+{% endblock %}

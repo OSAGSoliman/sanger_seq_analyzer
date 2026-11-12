@@ -1,0 +1,3 @@
+<nav class="seg" aria-label="Admin pages" style="margin-bottom:16px">
+  {% for href, label in admin_pages %}<a href="{{ href }}"{% if path == href %} class="on"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>

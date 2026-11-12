@@ -1,0 +1,26 @@
+<!-- Windows service definition for WinSW 2.12 (https://github.com/winsw/winsw, MIT licence). -->
+<service>
+  <id>SangerSeqServer</id>
+  <name>Sanger Seq Analyzer server</name>
+  <description>Sanger sequencing QC and Fetch data for the lab, in the browser.</description>
+  <executable>%BASE%\SangerSeqServer\SangerSeqServer.exe</executable>
+  <arguments>serve --data "@DATA@"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <!-- NetworkService: on the network it acts as this server's computer account (DOMAIN\SERVER$).
+       To use a domain account or gMSA instead, change the Log On tab in services.msc. -->
+  <serviceaccount>
+    <domain>NT AUTHORITY</domain>
+    <user>NetworkService</user>
+  </serviceaccount>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>20 sec</stoptimeout>
+  <logpath>@DATA@\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>
