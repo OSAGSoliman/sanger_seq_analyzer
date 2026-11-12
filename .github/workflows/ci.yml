@@ -217,7 +217,8 @@ jobs:
           mkdir data && sudo chown 10001:10001 data
           docker run -d --name ssa -p 18082:8443 -v "$PWD/data:/data" --read-only --tmpfs /tmp \
             --cap-drop ALL --security-opt no-new-privileges:true sanger-seq-server:ci
-          sleep 3
+          sleep 5
+          if [ "$(docker inspect -f '{{.State.Running}}' ssa)" != "true" ]; then docker logs ssa; ls -la data; exit 1; fi
           echo "$SSA_PW" | docker exec -i ssa sanger-seq server create-admin --username chief --password-stdin
           python3 packaging/server/smoke.py --base http://127.0.0.1:18082 --user chief --examples examples --wait 90 \
             || { docker logs ssa | tail -60; exit 1; }

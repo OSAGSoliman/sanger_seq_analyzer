@@ -202,3 +202,29 @@ def test_queued_runs_resume_after_a_restart(app, analyst, cfg):
     with TestClient(again):  # startup resumes queued runs
         pass
     assert again.state.ctx.services["runs"].get(run_id)["status"] == "done"
+
+
+def test_backup_and_restore_drill(app, analyst, cfg, tmp_path):
+    """A backup zip unpacked into an empty folder gives a working server with the same runs and users."""
+    import zipfile as zf
+
+    from conftest import Browser, InlineExecutor
+
+    from sanger_seq_analyzer.server import config
+    from sanger_seq_analyzer.server.app import create_app
+    from sanger_seq_analyzer.server.cli import backup
+    run_id, _ = start_run(analyst, ab1_files("good"))
+    idx = samples_of(app, run_id)["GOOD01"]["idx"]
+    analyst.post(f"/runs/{run_id}/samples/{idx}/review", data={"decision": "PASS", "expected": "0"})
+    archive = backup(cfg)
+    restored = tmp_path / "restored"
+    restored.mkdir()
+    with zf.ZipFile(archive) as z:
+        z.extractall(restored)
+    again = create_app(config.load(restored), executor=InlineExecutor())
+    user = Browser(again, "analyst1", "a long enough password")
+    page = user.get(f"/runs/{run_id}")
+    assert page.status_code == 200 and "1 of 3 reviewed" in page.text
+    assert user.get(f"/runs/{run_id}/samples/{idx}/view").status_code == 200
+    r = user.post(f"/runs/{run_id}/export", data={"scope": "all", "files": ["consensus"]})
+    assert zipfile.ZipFile(io.BytesIO(r.content)).read("consensus.fasta").decode().count(">") == 3
