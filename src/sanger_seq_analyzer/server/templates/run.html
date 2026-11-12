@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sample_row, counts %}
+{% block title %}{{ run.name }} · Runs{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <h1 style="margin:0">{{ run.name }}</h1>
+    <span class="hint">run {{ run.id }}</span>
+    <span class="badge b-{{ run.status }}">{{ run.status }}</span>
+    {% if run.status == "done" %}{{ counts(run, n_pass, n_fail, reviewed, samples|length) }}{% endif %}
+    <span class="grow"></span>
+    {% if run.status == "done" %}
+      <a class="button" href="/runs/{{ run.id }}/report" target="_blank" rel="noopener">Full report</a>
+      <button data-open-dialog="#export-dialog">Export…</button>
+      {% if can_review %}
+      <form method="post" action="/runs/{{ run.id }}/confirm-remaining" data-confirm="Confirm every sample that is not reviewed yet with the status the rules gave?">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button>Confirm all remaining</button></form>
+      <form method="post" action="/fetch/from-run/{{ run.id }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button title="Fill the Fetch data genotyping table from this run">Send to Fetch data</button></form>
+      {% endif %}
+    {% endif %}
+    {% if is_admin and run.status not in ("queued", "running") %}
+      <form method="post" action="/runs/{{ run.id }}/delete" data-confirm="Delete this run, its files and its reviews? This cannot be undone.">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Delete</button></form>
+    {% endif %}
+  </div>
+  <details>
+    <summary class="sub">Started by {{ run.creator or "?" }} on {{ run.created_at | local }} · {{ run.n_files }} files from {{ info.source or "upload" }} ·
+      reference {{ config.reference.name }} ({{ config.reference.sequence|length }} bp) · version {{ run.app_version }}</summary>
+    <dl class="kv" style="margin-top:10px">
+      <dt>Reference</dt><dd>{{ config.reference.name }} — {{ config.reference.description }} <span class="hint mono">sha256 {{ config.reference.sha256[:16] }}…</span></dd>
+      <dt>Forward tags</dt><dd>{{ config.forward_tags|join(", ") }}</dd>
+      <dt>Reverse tags</dt><dd>{{ config.reverse_tags|join(", ") }}</dd>
+      {% for title, fields in settings_groups %}<dt>{{ title }}</dt><dd>{% for meta, shown, text in fields %}{{ meta.label }} {{ text }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endfor %}
+    </dl>
+    {% if info.skipped %}<h3>Files not analysed</h3><ul>{% for s in info.skipped %}<li><code>{{ s.file }}</code>: {{ s.reason }}</li>{% endfor %}</ul>{% endif %}
+    {% if info.errors %}<h3>Unreadable files</h3><ul>{% for f, m in info.errors.items() %}<li><code>{{ f }}</code>: {{ m }}</li>{% endfor %}</ul>{% endif %}
+  </details>
+</section>
+
+{% if run.status in ("queued", "running") %}{% include "_run_status.html" %}{% endif %}
+{% if run.status == "failed" %}<div class="notice error">The analysis stopped with an error: {{ run.error }}. The details are in the server log.</div>{% endif %}
+{% if run.status == "cancelled" %}<div class="notice warn">This run was cancelled.</div>{% endif %}
+
+{% if run.status == "done" %}
+<div class="split">
+  <section class="card list-pane">
+    <div class="row" style="margin-bottom:8px">
+      <nav class="seg" data-kind-filter="#samples">
+        <button type="button" class="on" data-kind="">All</button><button type="button" data-kind="PASS">PASS</button><button type="button" data-kind="FAIL">FAIL</button><button type="button" data-kind="unreviewed">Not reviewed</button>
+      </nav>
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <input data-filter-table="#samples" placeholder="Find sample" aria-label="Find sample" style="flex:1">
+      {% if can_review %}<label class="inline hint"><input type="checkbox" id="auto-next" checked> next after confirming</label>{% endif %}
+    </div>
+    <div class="tablewrap" style="max-height:72vh">
+      <table class="grid" id="samples">
+        <thead><tr><th>Sample</th><th>Rules</th><th>Review</th></tr></thead>
+        <tbody>{% for x in samples %}{{ sample_row(run, x) }}{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+  <div class="detail-pane">
+    {% if samples %}
+    {% set first = (samples|selectattr("effective", "equalto", "FAIL")|first) or samples[0] %}
+    <div id="detail" hx-get="/runs/{{ run.id }}/samples/{{ first.idx }}" hx-trigger="load" hx-swap="outerHTML"></div>
+    {% else %}<div class="card"><p class="sub">No samples were found in this run.</p></div>{% endif %}
+  </div>
+</div>
+
+<dialog id="export-dialog">
+  <form method="post" action="/runs/{{ run.id }}/export" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h2>Export</h2>
+    <p class="hint">Reviewer decisions are applied: a sample confirmed as FAIL is not written to consensus.fasta.</p>
+    <fieldset class="stack"><legend>Samples</legend>
+      {% for key, label in scopes.items() %}<label class="inline"><input type="radio" name="scope" value="{{ key }}"{% if key == "all" %} checked{% endif %}> {{ label }}</label>{% endfor %}
+      <div class="chosen-list" style="max-height:180px;overflow:auto;border:1px solid var(--border-default);border-radius:6px;padding:6px">
+        {% for x in samples %}<label class="inline"><input type="checkbox" name="chosen" value="{{ x.sample }}"> {{ x.sample }} <span class="badge b-{{ x.effective }}">{{ x.effective }}</span></label>{% endfor %}
+      </div>
+      <span class="hint">The ticked samples are used with “Chosen samples”.</span>
+    </fieldset>
+    <fieldset class="stack"><legend>Files</legend>
+      {% for f in export_files %}<label class="inline"><input type="checkbox" name="files" value="{{ f.key }}" checked> <code>{{ f.filename }}</code> <span class="hint">{{ f.description }}</span></label>{% endfor %}
+    </fieldset>
+    <div class="row"><button class="primary">Download zip</button><button type="button" data-close-dialog>Close</button></div>
+  </form>
+</dialog>
+{% endif %}
+{% endblock %}

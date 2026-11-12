@@ -25,7 +25,8 @@ log = logging.getLogger("sanger_seq_analyzer.server")
 
 # Pages may only load scripts and styles from this server. The sample viewer (in a sandboxed
 # frame) sets its own, stricter policy.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; "
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
+       "img-src 'self' data:; font-src 'self'; "
        "connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; form-action 'self'; base-uri 'none'; "
        "object-src 'none'")
 

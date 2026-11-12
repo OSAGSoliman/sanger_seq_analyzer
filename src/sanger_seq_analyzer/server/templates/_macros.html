@@ -1,0 +1,11 @@
+{% macro sample_row(run, x, oob=False) -%}
+<tr id="row-{{ x.idx }}" class="pick" data-idx="{{ x.idx }}" data-kind="{{ x.effective }}" data-reviewed="{{ 1 if x.review else 0 }}"
+    hx-get="/runs/{{ run.id }}/samples/{{ x.idx }}" hx-target="#detail" hx-swap="outerHTML"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <td class="mono">{{ x.sample }}</td>
+  <td><span class="badge b-{{ x.status }}">{{ x.status }}</span></td>
+  <td>{% if x.review %}<span class="badge b-{{ x.review.decision }}" title="by {{ x.review.user }}, {{ x.review.at | local }}">✓ {{ x.review.decision }}{% if x.review.decision != x.status %}*{% endif %}</span> <span class="hint">{{ x.review.user }}</span>{% endif %}</td>
+</tr>
+{%- endmacro %}
+{% macro counts(run, n_pass, n_fail, reviewed, total, oob=False) -%}
+<span id="run-counts"{% if oob %} hx-swap-oob="true"{% endif %}><span class="badge b-PASS">{{ n_pass }} PASS</span> <span class="badge b-FAIL">{{ n_fail }} FAIL</span> <span class="sub">· {{ reviewed }} of {{ total }} reviewed</span></span>
+{%- endmacro %}

@@ -1,0 +1,26 @@
+{% if error %}
+<div class="notice error" role="alert">{{ error }}</div>
+{% else %}
+<h2 style="margin-top:20px">2. Check the pairs</h2>
+<p>{{ n_files }} file{{ "" if n_files == 1 else "s" }} from {{ source }} ·
+  <b>{{ scan.pairs|length }}</b> sample{{ "" if scan.pairs|length == 1 else "s" }},
+  {{ scan.complete }} with both reads.</p>
+{% for n in notes %}<div class="notice warn">{{ n }}</div>{% endfor %}
+{% set skipped = scan.skipped|rejectattr("reason", "equalto", "hidden")|list %}
+{% if skipped %}
+<details open><summary>{{ skipped|length }} file{{ "" if skipped|length == 1 else "s" }} will not be analysed</summary>
+  <ul>{% for s in skipped %}<li><code>{{ s.path.name }}</code>: {{ s.text }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+{% set one = [] %}{% for name, slot in scan.pairs.items() %}{% if slot|length < 2 %}{% set _ = one.append(name) %}{% endif %}{% endfor %}
+{% if one %}<div class="notice warn">Only one read: {{ one|join(", ") }}</div>{% endif %}
+<h2 style="margin-top:20px">3. Start</h2>
+<form hx-post="/runs" hx-encoding="multipart/form-data" class="stack">
+  <input type="hidden" name="draft" value="{{ token }}">
+  <label>Run name <input name="name" placeholder="e.g. Plate 2026-11-12 measles" maxlength="120"></label>
+  {% include "_run_settings.html" %}
+  <div id="start-problems"></div>
+  <div class="row"><button class="primary"{% if not scan.pairs %} disabled{% endif %}>Start the run</button>
+  <span class="hint">The run is queued and starts at once; you can leave the page.</span></div>
+</form>
+{% endif %}

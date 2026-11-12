@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}New run · Sanger Seq Analyzer{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>New run</h1>
+  <h2>1. Trace files</h2>
+  <p class="sub">Forward and reverse reads pair by name: <code>02SV260016292_216.ab1</code> (forward, MeV216) with <code>02SV260016292_214.ab1</code> (reverse, MeV214).
+  At most {{ max_files }} files of {{ max_mb }} MB each.</p>
+  <div class="row" style="align-items:flex-start;gap:24px">
+    <form id="upload-form" hx-post="/runs/draft" hx-encoding="multipart/form-data" hx-target="#draft" hx-swap="innerHTML" class="stack" style="flex:1;min-width:320px">
+      <div class="dropzone" id="dropzone">
+        <p><b>Drop .ab1 files here</b> or</p>
+        <div class="row" style="justify-content:center">
+          <label class="button">Choose files<input type="file" name="files" accept=".ab1,.abi" multiple hidden data-autosubmit></label>
+          <label class="button">Choose a folder<input type="file" name="files" webkitdirectory multiple hidden data-autosubmit></label>
+        </div>
+        <p class="hint" id="upload-progress"></p>
+      </div>
+    </form>
+    {% if roots %}
+    <div class="stack" style="flex:1;min-width:320px">
+      <b>…or a folder on the lab share</b>
+      <div class="row">
+        <select id="root-select" name="root" hx-get="/runs/browse" hx-target="#browser" hx-trigger="change, load" aria-label="Shared folder">
+          {% for r in roots %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div id="browser"></div>
+    </div>
+    {% endif %}
+  </div>
+  <div id="draft"></div>
+</section>
+{% endblock %}

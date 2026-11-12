@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/static/app.css?v={{ version }}">
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/app.js?v={{ version }}" defer></script>
+<script src="/static/app_runs.js?v={{ version }}" defer></script>
 </head>
 <body{% if csrf %} hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'{% endif %}>
 <header class="topbar">

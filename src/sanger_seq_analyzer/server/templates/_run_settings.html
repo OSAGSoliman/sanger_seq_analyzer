@@ -1,0 +1,27 @@
+<div class="row">
+  <label>Reference
+    <select name="reference" data-toggle-upload>
+      {% for name, ref in references.items() %}<option value="{{ name }}"{% if name == defaults.reference %} selected{% endif %}>{{ name }} ({{ ref.sequence|length }} bp)</option>{% endfor %}
+      {% if allow_upload is not defined or allow_upload %}<option value="upload">Upload a FASTA…</option>{% endif %}
+    </select>
+  </label>
+  <label class="ref-upload" hidden>Reference FASTA <input type="file" name="reference_file" accept=".fa,.fasta,.fas,.txt"></label>
+  <label>Forward tags <input name="forward_tags" value="{{ defaults.forward_tags|join(', ') }}" size="28"></label>
+  <label>Reverse tags <input name="reverse_tags" value="{{ defaults.reverse_tags|join(', ') }}" size="28"></label>
+</div>
+<details>
+  <summary>Rules (the lab defaults; change them for this run only)</summary>
+  {% for title, fields in groups %}
+  <h3>{{ title }}</h3>
+  <div class="row" style="align-items:flex-end">
+    {% for meta, shown, text in fields %}
+      {% if meta.kind == "bool" %}
+      <input type="hidden" name="s_{{ meta.name }}" value="0"><label class="inline" title="{{ meta.help }}"><input type="checkbox" name="s_{{ meta.name }}" value="1"{% if shown %} checked{% endif %}> {{ meta.label }}</label>
+      {% else %}
+      <label title="{{ meta.help }}">{{ meta.label }}{% if meta.unit %} ({{ meta.unit }}){% endif %}
+        <input type="number" name="s_{{ meta.name }}" value="{{ shown }}" step="{{ meta.step }}" min="{{ meta.minimum }}" max="{{ meta.maximum }}" style="width:110px"></label>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</details>

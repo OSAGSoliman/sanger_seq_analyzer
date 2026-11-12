@@ -1,0 +1,16 @@
+<div class="card" style="padding:10px 14px;margin:0">
+  <div class="row hint">
+    <a href="#" hx-get="/runs/browse?root={{ root.id }}&path=" hx-target="#browser">{{ root.name }}</a>
+    {% set acc = namespace(p="") %}
+    {% for c in crumbs %}{% set acc.p = (acc.p ~ "/" ~ c).strip("/") %} / <a href="#" hx-get="/runs/browse?root={{ root.id }}&path={{ acc.p|urlencode }}" hx-target="#browser">{{ c }}</a>{% endfor %}
+  </div>
+  <ul style="list-style:none;padding:0;margin:8px 0;max-height:260px;overflow:auto">
+    {% for d in dirs %}<li><a href="#" hx-get="/runs/browse?root={{ root.id }}&path={{ ((path ~ '/' ~ d).strip('/'))|urlencode }}" hx-target="#browser">📁 {{ d }}</a></li>{% endfor %}
+    {% if not dirs %}<li class="hint">No sub-folders.</li>{% endif %}
+  </ul>
+  <form hx-post="/runs/draft" hx-target="#draft" hx-swap="innerHTML" class="row">
+    <input type="hidden" name="root" value="{{ root.id }}"><input type="hidden" name="path" value="{{ path }}">
+    <span class="sub">{{ files|length }} trace file{{ "" if files|length == 1 else "s" }} here{% if files %} (and in sub-folders){% endif %}</span>
+    <button class="primary"{% if not files and not dirs %} disabled{% endif %}>Use this folder</button>
+  </form>
+</div>

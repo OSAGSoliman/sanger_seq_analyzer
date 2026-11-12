@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Runs · Sanger Seq Analyzer{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <h1 style="margin:0">QC runs</h1>
+    <nav class="seg"><a href="/runs?q={{ q|urlencode }}"{% if not mine %} class="on"{% endif %}>Everyone's</a><a href="/runs?mine=1&q={{ q|urlencode }}"{% if mine %} class="on"{% endif %}>Mine</a></nav>
+    <form method="get" action="/runs" class="row"><input type="hidden" name="mine" value="{{ mine }}"><input name="q" value="{{ q }}" placeholder="Run name or sample (accession)" aria-label="Search runs"><button>Search</button></form>
+    <span class="grow"></span>
+    {% if can_run %}<a class="button primary" href="/runs/new">New run</a>{% endif %}
+  </div>
+  <div id="runs-table"{% if busy %} hx-get="/runs?mine={{ mine }}&q={{ q|urlencode }}" hx-trigger="every 3s" hx-select="#runs-table" hx-swap="outerHTML"{% endif %}>
+  {% if runs %}
+  <div class="tablewrap"><table class="grid">
+    <thead><tr><th>#</th><th>Name</th><th>Started by</th><th>When</th><th>Status</th><th class="right">Samples</th><th class="right">PASS</th><th class="right">FAIL</th><th>Reviewed</th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      <tr>
+        <td class="num">{{ r.id }}</td>
+        <td><a href="/runs/{{ r.id }}">{{ r.name }}</a></td>
+        <td>{{ r.creator or "" }}</td>
+        <td class="nowrap">{{ r.created_at | local }}</td>
+        <td><span class="badge b-{{ r.status }}">{{ r.status }}</span></td>
+        <td class="right num">{{ r.n_samples if r.status == 'done' else '' }}</td>
+        <td class="right num">{{ r.n_pass if r.status == 'done' else '' }}</td>
+        <td class="right num">{{ r.n_fail if r.status == 'done' else '' }}</td>
+        <td>{% if r.status == 'done' %}{{ r.n_reviewed }} of {{ r.n_samples }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="sub">No runs yet.{% if can_run %} Start one with <a href="/runs/new">New run</a>.{% endif %}</p>
+  {% endif %}
+  </div>
+</section>
+{% endblock %}

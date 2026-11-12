@@ -1,0 +1,31 @@
+{% from "_macros.html" import sample_row, counts %}
+<div id="detail" data-idx="{{ s.idx }}">
+  <section class="card reviewbar">
+    <div class="card-head">
+      <h2 class="mono">{{ s.sample }}</h2>
+      <span class="badge b-{{ s.status }}" title="What the rules gave">Rules: {{ s.status }}</span>
+      {% if rv and rv.decision %}<span class="badge b-{{ rv.decision }}">✓ {{ rv.decision }}</span><span class="sub">confirmed by {{ rv.user }}, {{ rv.at | local }}</span>
+      {% else %}<span class="sub">Not reviewed yet</span>{% endif %}
+      {% if message == "saved" %}<span class="hint">Saved</span>{% endif %}
+      <span class="grow"></span>
+      {% if can_review %}
+      <form hx-post="/runs/{{ run.id }}/samples/{{ s.idx }}/review" hx-target="#detail" hx-swap="outerHTML" class="row">
+        <input type="hidden" name="expected" value="{{ rv.id if rv else 0 }}">
+        <button name="decision" value="PASS" class="pass">Confirm PASS</button>
+        <button name="decision" value="FAIL" class="danger">Confirm FAIL</button>
+        {% if rv and rv.decision %}<button name="decision" value="">Undo</button>{% endif %}
+      </form>
+      {% endif %}
+    </div>
+    {% if conflict is not none %}
+    <div class="notice warn" role="alert">{% if conflict %}Someone else changed this sample meanwhile: {{ conflict.decision or "cleared" }} by {{ conflict.user }} at {{ conflict.at | local("%H:%M") }}. Check it and confirm again if needed.{% else %}Someone else changed this sample meanwhile. Check it and confirm again if needed.{% endif %}</div>
+    {% endif %}
+    {% if reasons %}<div class="sub">{{ reasons|join(" · ") }}</div>{% endif %}
+    <div class="hint">{% for d, r in reads.items() %}{{ "Forward" if d == "F" else "Reverse" }}: {{ r.file or "missing" }} ({{ r.status }}){% if r.reasons %} — {{ r.reasons|join("; ") }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  </section>
+  <iframe class="viewer" src="/runs/{{ run.id }}/samples/{{ s.idx }}/view" sandbox="allow-scripts" title="Alignment and chromatograms of {{ s.sample }}"></iframe>
+</div>
+{% if oob %}
+<template>{{ sample_row(run, row, oob=True) }}</template>
+{{ counts(run, n_pass, n_fail, reviewed, total, oob=True) }}
+{% endif %}

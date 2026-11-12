@@ -1,0 +1,10 @@
+<div id="runstatus" class="card" hx-get="/runs/{{ run.id }}/status" hx-trigger="every 1s" hx-swap="outerHTML">
+  {% if run.status == "queued" %}
+    <p><span class="badge b-queued">queued</span> Waiting for the run before it to finish…</p>
+  {% else %}
+    {% set done = progress.done if progress else 0 %}{% set total = progress.total if progress else 0 %}
+    <p><span class="badge b-running">running</span> {% if total %}Sample {{ done }} of {{ total }}{% if progress.current %}: {{ progress.current }}{% endif %}{% else %}Starting…{% endif %}</p>
+    <div class="progress"><div style="width:{{ (100 * done / total) if total else 3 }}%"></div></div>
+  {% endif %}
+  <form hx-post="/runs/{{ run.id }}/cancel" style="margin-top:10px"><button class="small danger">Cancel run</button></form>
+</div>

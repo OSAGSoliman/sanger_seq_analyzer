@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Lab defaults · Admin{% endblock %}
+{% block content %}
+{% include "_admin_nav.html" %}
+{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+{% if saved %}<div class="notice success">Saved. New runs start with these rules.</div>{% endif %}
+<section class="card">
+  <h2>Lab defaults for new runs</h2>
+  <p class="sub">Every new run starts with these; the person starting a run can change them for that run only.
+  The defaults are the published RECall rules (Woods et al. 2012) and the lab's 75% ≥ Q20 read cutoff.</p>
+  <form method="post" action="/admin/defaults" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% set defaults = d %}{% set allow_upload = false %}
+    {% include "_run_settings.html" %}
+    <div><button class="primary">Save lab defaults</button></div>
+  </form>
+</section>
+{% endblock %}
