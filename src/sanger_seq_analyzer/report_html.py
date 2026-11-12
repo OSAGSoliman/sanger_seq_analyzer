@@ -333,6 +333,23 @@ def _sample(sr: SampleResult, result: RunResult, sid: str, viewers: dict) -> str
             f'</section>')
 
 
+def _legend_text(s: QCSettings) -> str:
+    return (f"Chromatograms: A green, C blue, G black (light grey in dark mode), T red; bars show each base's "
+            f"quality, the dashed line is Q{s.min_quality}; grey shading = trimmed ends. Reads on the minus "
+            f"strand are shown reverse-complemented so both read left to right. Scroll sideways to see the "
+            f"whole read. When printed, each sample starts on a new page. {pr.rule_summary(s)}")
+
+
+def _page(title: str, body: str, s: QCSettings, viewers: dict) -> str:
+    payload = json.dumps({"minQ": s.min_quality, "reads": viewers}, separators=(",", ":")).replace("</", "<\\/")
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<title>{e(title)}</title><style>{CSS}</style></head><body><main class="page">'
+            f'{body}<footer class="legend">{e(_legend_text(s))}</footer></main>'
+            f'<script type="application/json" id="trace-data">{payload}</script><script>{JS}</script>'
+            f'</body></html>')
+
+
 def render_html(result: RunResult) -> str:
     """The whole report as one self-contained HTML page."""
     s = result.settings
@@ -340,15 +357,17 @@ def render_html(result: RunResult) -> str:
     ids = {sr.sample: make_id(sr.sample) for sr in result.samples}
     viewers: dict = {}
     sections = "".join(_sample(sr, result, ids[sr.sample], viewers) for sr in result.samples)
-    payload = json.dumps({"minQ": s.min_quality, "reads": viewers}, separators=(",", ":")).replace("</", "<\\/")
-    legend = (f"Chromatograms: A green, C blue, G black (light grey in dark mode), T red; bars show each base's "
-              f"quality, the dashed line is Q{s.min_quality}; grey shading = trimmed ends. Reads on the minus "
-              f"strand are shown reverse-complemented so both read left to right. Scroll sideways to see the "
-              f"whole read. When printed, each sample starts on a new page. {pr.rule_summary(s)}")
-    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title>Sanger QC report</title><style>{CSS}</style></head><body><main class="page">'
-            f'{_header(result)}{_rules(s)}{_summary(result, ids)}{sections}'
-            f'<footer class="legend">{e(legend)}</footer></main>'
-            f'<script type="application/json" id="trace-data">{payload}</script><script>{JS}</script>'
-            f'</body></html>')
+    return _page("Sanger QC report", f"{_header(result)}{_rules(s)}{_summary(result, ids)}{sections}", s, viewers)
+
+
+def render_sample(result: RunResult, name: str) -> str:
+    """One sample as a self-contained page, without the run header, rules and summary table.
+
+    The server shows it inside a frame next to its own review buttons.
+    """
+    sr = next((x for x in result.samples if x.sample == name), None)
+    if sr is None:
+        raise KeyError(name)
+    viewers: dict = {}
+    section = _sample(sr, result, _Ids()(sr.sample), viewers)
+    return _page(f"{sr.sample} · Sanger QC", section, result.settings, viewers)

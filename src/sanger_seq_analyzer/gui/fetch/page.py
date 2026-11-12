@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...fetch import tables
-from ...fetch.linking import COMPUTED, DATE_COLUMNS, GENOTYPING, MEANS_COLUMNS
+from ...fetch.linking import COMPUTED, GENOTYPING, MEANS_COLUMNS
 from ...presentation import plural
 from ..theme import current
 from ..widgets.common import button, card, divider, hbox, label, vbox
@@ -42,7 +42,6 @@ ROW_COLORS = {"pass": "pass.bg", "fail": "fail.bg", "check": "warn.bg"}  # green
 STATE_TIPS = {"pass": "PASS: genotyped, found and named without problems",
               "fail": "FAIL in the genotyping table (FAIL, REINJECT or REPEAT)",
               "check": "To check"}
-NAME_INPUTS = {"Admin Level 1", "Case Onset Date", "Collection Date", "to upload?"}
 
 
 class GenotypingTable(QTableWidget):
@@ -577,29 +576,15 @@ class FetchPage(QWidget):
     def _means_edited(self, item: QTableWidgetItem) -> None:
         if self._filling:
             return
-        row = self.c.rows[item.row()]
         if item.column() == 0:
-            row.include = item.checkState() == Qt.CheckState.Checked
+            self.c.session.set_include(item.row(), item.checkState() == Qt.CheckState.Checked)
             self.refresh_results()
             return
         col = self.c.columns[item.column() - 1]
         if col not in MEANS_COLUMNS:
             return
-        text = item.text().strip()
-        if col in DATE_COLUMNS:
-            row.values[col] = tables.parse_date(text) or text
-        elif col == "TAT":
-            row.values[col] = int(text) if text.lstrip("-").isdigit() else text
-        else:
-            row.values[col] = text
-        if col == "WHO Strain Name":
-            row.strain_manual = bool(text)
-        if col == "to upload?":
-            row.include = text.lower() in ("yes", "y")
-        if col in NAME_INPUTS or col == "WHO Strain Name":
-            self.c.regenerate_names()
-        elif col == "Genotype":
-            self._color_row(item.row())
+        self.c.edit_cell(item.row(), col, item.text())  # renumbers the names (namesChanged) when needed
+        self._color_row(item.row())
 
     def choose_columns(self) -> None:
         dialog = ColumnsDialog(self.c.columns, self.c.all_columns(), self)

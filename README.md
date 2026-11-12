@@ -278,14 +278,14 @@ Python 3.12 or newer is required: on Python 3.10 and 3.11, PySide6 6.12 releases
 one time too many on many Qt calls, and the app crashes after a few thousand screen updates.
 
 ```
-pip install git+https://github.com/OSAGSoliman/sanger_seq_analyzer.git
+pip install "sanger_seq_analyzer[gui] @ git+https://github.com/OSAGSoliman/sanger_seq_analyzer.git"
 sanger-seq-gui                                        # opens the window
 sanger-seq qc path/to/ab1_folder -r measles-n450 -o results   # or -r your_reference.fasta
 ```
 
-This installs PySide6-Essentials (Qt) for the window. The command line never loads Qt, so
-`sanger-seq` also works where Qt cannot be installed (`pip install --no-deps` plus `biopython`
-and `numpy`); `sanger-seq gui` then explains how to add the window.
+The `[gui]` extra installs PySide6-Essentials (Qt) for the window. Without it you get the
+command line only, which never loads Qt, so `sanger-seq` also works where Qt cannot be
+installed; `sanger-seq gui` then explains how to add the window.
 
 **File naming:** the sample name is everything before the last direction tag (F, FWD, FOR,
 FORWARD / R, REV, REVERSE; change them in Settings or with `--forward-tags`/`--reverse-tags`).
@@ -295,7 +295,7 @@ Tags can be separated by `_`, `-`, `.` or a space and are matched as literal tex
 ## Development
 
 ```
-pip install -e ".[dev]"
+pip install -e ".[gui,server,dev]"
 pytest                                   # backend and window tests (the window tests run headless)
 python scripts/screenshots.py shots --theme both   # every screen of the window as PNG
 sanger-seq-gui --self-test st            # headless end-to-end check (st/self_test.json)

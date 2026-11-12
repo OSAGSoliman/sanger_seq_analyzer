@@ -4,13 +4,20 @@ The workbook is copied to a ``MeaNS backups`` folder next to it before anything
 is written, and saved through a temporary file so an error never leaves a
 half-written workbook. Each new cell copies the style and number format of the
 cell above it, so dates look like the rows already there.
+
+Only one save at a time: a ``.<name>.saving.lock`` file next to the template is
+created exclusively for the duration of the save, so the desktop app and the
+server (or two PCs) never append to the same template at once.
 """
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import os
 import shutil
+import socket
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -18,6 +25,7 @@ from pathlib import Path
 from .tables import TableError, as_text, clean_header, find_header, match_column, norm_key
 
 BACKUP_FOLDER = "MeaNS backups"
+STALE_LOCK_SECONDS = 120  # a saving lock older than this was left by a crash
 
 
 @dataclass
@@ -42,6 +50,47 @@ def lock_file(path: Path) -> Path | None:
     return None
 
 
+def saving_lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.saving.lock")
+
+
+@contextlib.contextmanager
+def saving_lock(path: str | Path):
+    """Hold the template's saving lock; raises TableError when someone else is saving it."""
+    lock = saving_lock_path(Path(path))
+    for attempt in range(2):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock.stat().st_mtime
+                who = lock.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                age, who = 0.0, ""
+            if attempt == 0 and age > STALE_LOCK_SECONDS:
+                _remove(lock)
+                continue
+            raise TableError(f"{Path(path).name} is being saved by someone else"
+                             f"{f' ({who})' if who else ''}. Try again in a minute.") from None
+        except OSError as exc:
+            raise TableError(f"{Path(path).name} cannot be saved: the folder is not writable ({exc})") from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"{socket.gethostname()} {datetime.now():%Y-%m-%d %H:%M:%S}")
+        yield lock
+    finally:
+        _remove(lock)
+
+
+def _backup_name(folder: Path, path: Path) -> Path:
+    base = f"{path.stem} {datetime.now():%Y-%m-%d %H%M%S}"
+    candidate, n = folder / f"{base}{path.suffix}", 2
+    while candidate.exists():
+        candidate, n = folder / f"{base} ({n}){path.suffix}", n + 1
+    return candidate
+
+
 def _find_sheet(wb, key: str, expected: list[str]):
     best = None
     for ws in wb.worksheets:
@@ -64,20 +113,29 @@ def append_rows(path: str | Path, rows: list[dict], expected: list[str], key: st
     Rows whose ``unique`` values are already in the template are skipped. Raises
     :class:`TableError` with a readable message when the file cannot be written.
     """
-    from openpyxl import load_workbook
-
     path = Path(path)
     if not path.is_file():
         raise TableError(f"template not found: {path}")
     if path.suffix.lower() not in (".xlsx", ".xlsm"):
         raise TableError(f"{path.name} cannot be updated: new rows can only be added to an .xlsx or .xlsm "
                          "workbook. Open it in Excel and save it as .xlsx (Excel Workbook), then choose that file")
+    with saving_lock(path):
+        return _append_rows(path, rows, expected, key, unique, backup)
+
+
+def _append_rows(path: Path, rows: list[dict], expected: list[str], key: str, unique: tuple[str, ...],
+                 backup: bool) -> AppendResult:
+    from openpyxl import load_workbook
+
     lock = lock_file(path)
     if lock is not None:
         raise TableError(f"{path.name} is open in Excel (found {lock.name}). Close it in Excel and try again.")
     keep_vba = path.suffix.lower() == ".xlsm"
     try:
         wb = load_workbook(path, keep_vba=keep_vba)
+    except PermissionError as exc:
+        raise TableError(f"{path.name} could not be opened: it is open in Excel or another program, or "
+                         "read-only. Close it and try again.") from exc
     except Exception as exc:
         raise TableError(f"{path.name} could not be opened ({type(exc).__name__}: {exc})") from exc
     ws, header_row = _find_sheet(wb, key, expected)
@@ -123,7 +181,7 @@ def append_rows(path: str | Path, rows: list[dict], expected: list[str], key: st
         if backup:
             folder = path.parent / BACKUP_FOLDER
             folder.mkdir(exist_ok=True)
-            backup_path = folder / f"{path.stem} {datetime.now():%Y-%m-%d %H%M%S}{path.suffix}"
+            backup_path = _backup_name(folder, path)
             shutil.copy2(path, backup_path)
         # style source per column: the lowest filled cell of that column (dates keep their format)
         style_of = {}
