@@ -44,6 +44,10 @@
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }
   });
+  document.addEventListener("htmx:afterRequest", function () {
+    var out = document.getElementById("upload-progress");
+    if (out) { out.textContent = ""; }
+  });
   document.addEventListener("htmx:xhr:progress", function (e) {
     var out = document.getElementById("upload-progress");
     if (out && e.detail && e.detail.total) {
@@ -84,14 +88,16 @@
     if (nav && table && nav.dataset.current) { applyKind(table, nav.dataset.current); }
   });
 
-  // after Confirm PASS / FAIL: show the next sample in the list
-  document.body && document.body.addEventListener("sample-reviewed", function () {
+  // after Confirm PASS / FAIL: show the next sample in the list (the answer is marked data-advance)
+  document.addEventListener("htmx:afterSettle", function () {
+    var detail = document.getElementById("detail");
+    if (!detail || detail.dataset.advance !== "1") { return; }
+    delete detail.dataset.advance;
     var auto = document.getElementById("auto-next");
     if (!auto || !auto.checked) { return; }
     var rows = Array.prototype.filter.call(document.querySelectorAll("#samples tbody tr"),
       function (tr) { return !tr.hidden; });
-    var detail = document.getElementById("detail");
-    var at = rows.findIndex(function (tr) { return detail && tr.dataset.idx === detail.dataset.idx; });
+    var at = rows.findIndex(function (tr) { return tr.dataset.idx === detail.dataset.idx; });
     var next = rows[at + 1];
     if (next) { htmx.trigger(next, "click"); next.scrollIntoView({ block: "nearest" }); }
   });

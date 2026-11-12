@@ -88,7 +88,7 @@ def test_reviews_conflicts_and_confirm_remaining(app, analyst, make_user, finish
     idx = samples_of(app, finished_run)["BORDER01"]["idx"]
     url = f"/runs/{finished_run}/samples/{idx}/review"
     r = analyst.post(url, data={"decision": "FAIL", "expected": "0"}, headers={"HX-Request": "true"})
-    assert r.status_code == 200 and "✓ FAIL" in r.text and r.headers.get("HX-Trigger") == "sample-reviewed"
+    assert r.status_code == 200 and "✓ FAIL" in r.text and "data-advance=\"1\"" in r.text
     # the second reviewer's page still showed "not reviewed": refused, and told who changed it
     r = other.post(url, data={"decision": "PASS", "expected": "0"}, headers={"HX-Request": "true"})
     assert r.status_code == 409 and "Someone else changed this sample" in r.text and "Analyst1" in r.text

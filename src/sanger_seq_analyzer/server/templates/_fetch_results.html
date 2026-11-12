@@ -29,7 +29,7 @@
           <td><input type="checkbox" aria-label="Save {{ m.row.accession }}"{% if m.row.include %} checked{% endif %}
                hx-post="/fetch/include" hx-vals='{{ {"row": m.i}|tojson }}' hx-include="this" name="on" value="1" hx-target="#results" hx-swap="outerHTML" hx-trigger="change"></td>
           {% for c, text, editable, src in m.cells %}
-            {% if editable %}<td class="edit"><input id="c-{{ m.i }}-{{ loop.index }}" name="value" value="{{ text }}" aria-label="{{ c }} of {{ m.row.accession }}" title="{{ src }}"
+            {% if editable %}<td class="edit"><input id="c-{{ m.i }}-{{ loop.index }}" name="value" value="{{ text }}" size="{{ [text|length + 2, 10]|max }}" aria-label="{{ c }} of {{ m.row.accession }}" title="{{ src }}"
                  hx-post="/fetch/cell" hx-vals='{{ {"row": m.i, "col": c}|tojson }}' hx-trigger="change" hx-target="#results" hx-swap="outerHTML"></td>
             {% else %}<td title="{{ src }}">{{ text }}</td>{% endif %}
           {% endfor %}

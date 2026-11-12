@@ -1,5 +1,5 @@
 {% from "_macros.html" import sample_row, counts %}
-<div id="detail" data-idx="{{ s.idx }}">
+<div id="detail" data-idx="{{ s.idx }}"{% if advance %} data-advance="1"{% endif %}>
   <section class="card reviewbar">
     <div class="card-head">
       <h2 class="mono">{{ s.sample }}</h2>

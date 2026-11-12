@@ -20,7 +20,7 @@ param(
     [int]$Port = 8443,
     [string]$CertFile = "",          # PEM certificate from the hospital CA (HTTPS)
     [string]$KeyFile = "",           # its PEM private key
-    [string]$DataAccount = "NT AUTHORITY\NETWORK SERVICE",
+    [string]$DataAccount = "*S-1-5-20",  # NT AUTHORITY\NETWORK SERVICE (by SID: works in every language)
     [switch]$NoFirewall,
     [switch]$NoStart
 )

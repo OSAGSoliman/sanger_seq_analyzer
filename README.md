@@ -9,6 +9,9 @@ and linked forward/reverse chromatograms) and written as FASTA, CSV, JSON and an
 QC is the first tool; the window and the command line are both set up so more tools can be
 added next to it.
 
+It comes two ways: the **desktop app** for one PC, and the **lab server** that the whole team
+opens in a browser (see [Lab server](#lab-server-in-the-browser) and [DEPLOY.md](DEPLOY.md)).
+
 ## The desktop window
 
 Start it with `sanger-seq-gui` (or the `SangerSeqAnalyzer` app). It has four pages:
@@ -292,6 +295,32 @@ FORWARD / R, REV, REVERSE; change them in Settings or with `--forward-tags`/`--r
 For example, `HIV01_RT_F_A03.ab1` and `HIV01_RT_R_A04.ab1` both belong to the sample `HIV01_RT`.
 Tags can be separated by `_`, `-`, `.` or a space and are matched as literal text.
 
+## Lab server (in the browser)
+
+One server for the lab team: the same QC and Fetch data, opened in Edge or Chrome, with
+sign-in and roles (viewer, analyst, admin). What it adds to the desktop app:
+
+- **Runs in one place.** Upload `.ab1` files or a whole folder, or pick a folder on the lab
+  share; check the pairs; start. Runs are queued, kept with their inputs, settings and
+  reference, and visible to the whole lab.
+- **Reviews with who and when.** Confirm PASS or FAIL per sample; the history is kept, and
+  if two people review the same sample at once the second is told who changed it.
+- **Fetch data for everyone.** The masterlist, daily sheet, line list and MeaNS template come
+  from the lab share (the newest file by the lab's naming) or from uploads. Saving to the
+  template is one locked step: if someone else saved first, the strain names are numbered
+  again and shown before anything is written.
+- **Audit log** of sign-ins, runs, reviews, exports, uploads and template saves.
+
+It runs as a Windows service (`SangerSeqServer-windows.zip`) or a Docker container on Linux,
+inside the hospital network, with nothing loaded from the internet. Installation, HTTPS,
+service account, backups and upgrades: **[DEPLOY.md](DEPLOY.md)**. With Python:
+
+```
+pip install "sanger_seq_analyzer[server] @ git+https://github.com/OSAGSoliman/sanger_seq_analyzer.git"
+sanger-seq server --data ./ssa-data create-admin
+sanger-seq serve --data ./ssa-data                 # https://<this computer>:8443/ once a certificate is set
+```
+
 ## Development
 
 ```
@@ -317,12 +346,16 @@ python packaging/build.py                # PyInstaller builds in dist/ (needs ".
 | `review.py` | reviewer decisions (confirm PASS/FAIL) and export scope (all, PASS, FAIL, chosen samples) |
 | `fetch/` | Fetch data: spreadsheet reading (`tables.py`), linking and MeaNS columns (`linking.py`), WHO strain names (`strains.py`), writing to the template (`template.py`) |
 | `gui/` | desktop window (PySide6). `gui/tools.py` registers tools; `gui/qc/` is the QC tool, `gui/fetch/` the Fetch data page |
+| `fetch/session.py`, `fetch/sources.py` | Fetch data state and the lab file names, shared by the window and the server |
+| `server/` | lab server (FastAPI, Jinja2, vendored htmx, SQLite): `auth.py` accounts and sessions, `runs.py` + `jobs.py` QC runs, `fetch_service.py` Fetch data, `tools/` the pages (registered like the window's tools), `cli.py` the `serve`/`server` commands |
 | `simulate.py` | simulated chromatograms and an ABIF writer, used for the examples and tests |
 
 CI runs the tests on Windows, macOS and Linux (Python 3.12 and 3.13), checks that the command
-line works without Qt, then builds the Windows and macOS apps with PyInstaller and runs the
-packaged command line and the app's `--self-test` before uploading them. Pushing a `v*` tag
-publishes a release.
+line and the server work without Qt, then builds the Windows and macOS apps with PyInstaller and
+runs the packaged command line and the app's `--self-test` before uploading them. The server is
+built as a Windows executable (installed and removed as a service on the runner) and as a Docker
+image, and both are run against the examples with `packaging/server/smoke.py`. Pushing a `v*`
+tag publishes a release.
 
 ### Not yet
 

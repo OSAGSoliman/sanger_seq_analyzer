@@ -166,3 +166,12 @@ def test_cli_create_admin_and_backup(tmp_path, monkeypatch, capsys):
         assert "sanger_seq.db" in z.namelist() and "config.toml" in z.namelist()
     from sanger_seq_analyzer.server import config
     assert backup(config.load(data)).is_file()
+
+
+def test_config_accepts_a_byte_order_mark(tmp_path):
+    from sanger_seq_analyzer.server import config
+    data = tmp_path / "d"
+    data.mkdir()
+    (data / "config.toml").write_bytes("﻿port = 9443\ntls_cert = \"certs/a.crt\"\n".encode("utf-8"))
+    cfg = config.load(data)
+    assert cfg.port == 9443 and cfg.tls_cert == str(data / "certs/a.crt")

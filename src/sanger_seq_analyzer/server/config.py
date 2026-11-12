@@ -100,7 +100,8 @@ def load(data_dir: str | Path, create: bool = True) -> Config:
         data_dir.mkdir(parents=True, exist_ok=True)
         if not path.exists():
             path.write_text(DEFAULT_TOML, encoding="utf-8")
-    values = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    # utf-8-sig: Windows PowerShell 5 writes a byte-order mark when it edits the file
+    values = tomllib.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     known = {f.name for f in fields(Config)} - {"data_dir", "extra"}
     cfg = Config(data_dir=data_dir, **{k: v for k, v in values.items() if k in known})
     cfg.extra = {k: v for k, v in values.items() if k not in known}

@@ -1,5 +1,6 @@
 /* Sanger Seq Analyzer (server). Colours come from /static/theme.css (the app's design tokens). */
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 :root{--font-ui:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
   --font-mono:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;--radius:8px}
 html,body{margin:0;background:var(--bg-window);color:var(--text-primary);font:14px/1.45 var(--font-ui)}
@@ -125,5 +126,5 @@ legend{font-weight:600;padding:0 4px}
 .source{border:1px solid var(--border-default);border-radius:var(--radius);padding:12px 14px;display:flex;
   flex-direction:column;gap:8px;background:var(--bg-sunken)}
 .source select{max-width:100%;min-width:0;flex:1}
-#means td.edit input{min-width:120px}
+#means td.edit input{min-width:0;width:auto}
 #means td{white-space:nowrap}

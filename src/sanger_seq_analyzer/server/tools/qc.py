@@ -330,7 +330,7 @@ def router(ctx: ServerContext) -> APIRouter:
     def sample_detail(request: Request, run_id: int, idx: int, sess: Session = Depends(viewer)):
         return _detail(request, sess, run_id, idx)
 
-    def _detail(request, sess, run_id, idx, message="", conflict=None, status_code=200):
+    def _detail(request, sess, run_id, idx, message="", conflict=None, status_code=200, advance=False):
         store = _store(ctx)
         run = _run_or_404(run_id)
         s = store.sample(run_id, idx)
@@ -343,7 +343,8 @@ def router(ctx: ServerContext) -> APIRouter:
                       can_review=sess.user.can("analyst"), message=message, conflict=conflict,
                       row=next(x for x in rows if x["idx"] == idx), reviewed=sum(1 for x in rows if x["review"]),
                       total=len(rows), n_pass=sum(1 for x in rows if x["effective"] == "PASS"),
-                      n_fail=sum(1 for x in rows if x["effective"] == "FAIL"), oob=is_htmx(request))
+                      n_fail=sum(1 for x in rows if x["effective"] == "FAIL"), oob=is_htmx(request),
+                      advance=advance)
 
     @r.get("/runs/{run_id}/samples/{idx}/view")
     def sample_view(request: Request, run_id: int, idx: int, sess: Session = Depends(viewer)):
@@ -370,10 +371,8 @@ def router(ctx: ServerContext) -> APIRouter:
             return _detail(request, sess, run_id, idx, conflict=exc.latest, status_code=409)
         except RunError as exc:
             raise HTTPException(400, str(exc)) from None
-        response = _detail(request, sess, run_id, idx, message="saved" if changed["changed"] else "")
-        if decision:
-            response.headers["HX-Trigger"] = "sample-reviewed"
-        return response
+        return _detail(request, sess, run_id, idx, message="saved" if changed["changed"] else "",
+                       advance=bool(decision))
 
     @r.post("/runs/{run_id}/confirm-remaining")
     def confirm_remaining(request: Request, run_id: int, sess: Session = Depends(analyst)):

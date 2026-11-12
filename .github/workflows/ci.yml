@@ -135,9 +135,114 @@ jobs:
           name: SangerSeqAnalyzer-${{ matrix.name }}
           path: SangerSeqAnalyzer-${{ matrix.name }}.zip
 
+  server-windows:
+    # the lab server as a Windows executable and service (WinSW), smoke-tested on the runner
+    needs: [test, cli-no-qt]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SSA_PW: "ci smoke password 123"
+      WINSW_SHA256: "b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f"  # WinSW.NET461.exe v2.12.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -c packaging/constraints.txt ".[server,build]"
+      - name: Build the server executable
+        run: python packaging/build.py server
+      - name: Get WinSW (pinned by checksum)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe -OutFile WinSW.exe
+          $h = (Get-FileHash WinSW.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:WINSW_SHA256) { throw "WinSW checksum mismatch: $h" }
+      - name: Smoke test the executable
+        shell: pwsh
+        run: |
+          $data = "$env:RUNNER_TEMP\ssa-data"
+          $env:SSA_PW | dist\SangerSeqServer\SangerSeqServer.exe server --data $data create-admin --username chief --password-stdin
+          if ($LASTEXITCODE) { exit 1 }
+          (Get-Content "$data\config.toml") -replace '^port = \d+', 'port = 18080' | Set-Content "$data\config.toml"
+          $p = Start-Process dist\SangerSeqServer\SangerSeqServer.exe -ArgumentList 'serve','--data',$data -PassThru
+          python packaging/server/smoke.py --base http://127.0.0.1:18080 --user chief --examples examples --wait 90
+          $code = $LASTEXITCODE
+          Stop-Process -Id $p.Id -Force
+          if ($code) { Get-Content "$data\logs\server.log" -Tail 60; exit $code }
+      - name: Package
+        shell: bash
+        run: |
+          mkdir server-release
+          cp -R dist/SangerSeqServer server-release/SangerSeqServer
+          cp WinSW.exe server-release/SangerSeqServerService.exe
+          cp packaging/server/windows/*.ps1 packaging/server/windows/SangerSeqServerService.xml \
+             packaging/server/windows/WinSW-LICENSE.txt packaging/server/smoke.py DEPLOY.md server-release/
+          cd server-release && 7z a ../SangerSeqServer-windows.zip . > /dev/null
+      - name: Install, check and remove the Windows service
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File server-release\install.ps1 -Port 18081 -NoFirewall
+          if ($LASTEXITCODE) { exit 1 }
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { if ((Invoke-WebRequest http://127.0.0.1:18081/healthz -UseBasicParsing).StatusCode -eq 200) { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 2
+          }
+          Get-Service SangerSeqServer | Format-List Name, Status, StartType
+          if (-not $ok) { Get-ChildItem "$env:ProgramData\SangerSeqServer\logs" | ForEach-Object { Get-Content $_.FullName -Tail 40 }; exit 1 }
+          powershell -ExecutionPolicy Bypass -File "$env:ProgramFiles\SangerSeqServer\uninstall.ps1" -RemoveData
+          if (Get-Service SangerSeqServer -ErrorAction SilentlyContinue) { throw "service still installed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SangerSeqServer-windows
+          path: SangerSeqServer-windows.zip
+
+  server-docker:
+    # the lab server as a Linux container, smoke-tested; on release tags also saved and pushed to GHCR
+    needs: [test, cli-no-qt]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SSA_PW: "ci smoke password 123"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -f packaging/server/Dockerfile -t sanger-seq-server:ci .
+      - name: Smoke test the container
+        run: |
+          mkdir data && sudo chown 10001:10001 data
+          docker run -d --name ssa -p 18082:8443 -v "$PWD/data:/data" --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true sanger-seq-server:ci
+          sleep 3
+          echo "$SSA_PW" | docker exec -i ssa sanger-seq server create-admin --username chief --password-stdin
+          python3 packaging/server/smoke.py --base http://127.0.0.1:18082 --user chief --examples examples --wait 90 \
+            || { docker logs ssa | tail -60; exit 1; }
+          docker exec ssa sanger-seq server health
+          docker exec ssa sanger-seq server backup
+          docker rm -f ssa
+      - name: Save and publish the image (release tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')/sanger-seq-server"
+          docker tag sanger-seq-server:ci "sanger-seq-server:$version"
+          docker save "sanger-seq-server:$version" | gzip > sanger-seq-server-image.tar.gz
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag sanger-seq-server:ci "$image:$version" && docker tag sanger-seq-server:ci "$image:latest"
+          docker push "$image:$version" && docker push "$image:latest"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: sanger-seq-server-image
+          path: sanger-seq-server-image.tar.gz
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, server-windows, server-docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -147,4 +252,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: SangerSeqAnalyzer-*.zip
+          files: |
+            SangerSeqAnalyzer-*.zip
+            SangerSeqServer-windows.zip
+            sanger-seq-server-image.tar.gz
