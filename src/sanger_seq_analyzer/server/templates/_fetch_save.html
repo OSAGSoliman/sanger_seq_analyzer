@@ -1,0 +1,17 @@
+<h2>Save to the MeaNS template</h2>
+{% if error %}
+  <div class="notice error" role="alert">{{ error }}</div>
+  <div class="row"><button type="button" data-close-dialog>Close</button></div>
+{% else %}
+  {% if renumbered %}<div class="notice warn" role="alert">Someone saved to the template since you opened this. The names were numbered again after theirs; nothing was written. Check the new names and save again.</div>{% endif %}
+  <p>Add {{ names|length }} row{{ "" if names|length == 1 else "s" }} to <b>{{ cand.name }}</b>{% if cand.kind == "folder" %} on the lab share (a backup copy is made first){% else %} (the server keeps it as a new version){% endif %}:</p>
+  <div class="tablewrap" style="max-height:40vh"><table class="grid"><thead><tr><th>Accession</th><th>WHO strain name</th></tr></thead>
+    <tbody>{% for acc, name in names %}<tr><td class="mono">{{ acc }}</td><td class="mono">{{ name }}</td></tr>{% endfor %}</tbody></table></div>
+  <form method="post" action="/fetch/save" class="row" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    {% for acc, name in names %}<input type="hidden" name="names" value="{{ name }}">{% endfor %}
+    <button class="primary">Add {{ names|length }} row{{ "" if names|length == 1 else "s" }}</button>
+    <button type="button" data-close-dialog>Cancel</button>
+  </form>
+{% endif %}

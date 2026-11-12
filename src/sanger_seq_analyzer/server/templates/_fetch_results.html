@@ -1,0 +1,69 @@
+<section class="card" id="results">
+  <div class="card-head">
+    <h2>3. Results</h2>
+    <nav class="seg" data-view-switch>
+      <button type="button" class="on" data-view="#means-wrap">MeaNS table</button><button type="button" data-view="#all-wrap">All columns</button><button type="button" data-view="#match-wrap">Matching</button>
+    </nav>
+    <span class="grow"></span>
+    <button class="small" data-open-dialog="#columns-dialog">Columns…</button>
+    <form method="post" action="/fetch/regenerate"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small" title="Number the rows to upload again after the names in the template">Regenerate strain names</button></form>
+    <form method="post" action="/fetch/export"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Export to Excel</button></form>
+    <button class="small" data-copy-table="#means" title="Copy the shown rows (paste into Excel)">Copy table</button>
+    <button class="primary" hx-post="/fetch/save/preview" hx-target="#save-body" data-show-dialog="#save-dialog"{% if not counts.ticked %} disabled{% endif %}>Save to MeaNS template…</button>
+  </div>
+  {% if changed %}<div class="notice warn">Changed since you fetched: {{ changed|join(", ") }}. Fetch again to use the new files.</div>{% endif %}
+  <p class="sub">{{ means|length }} accessions · <span class="badge b-PASS">{{ n_pass }} pass</span> <span class="badge b-FAIL">{{ n_fail }} fail</span> <span class="badge b-warn">{{ n_check }} to check</span> · {{ complete }} found in every file · {{ counts.ticked }} ticked to save</p>
+  <div class="row" style="margin-bottom:8px">
+    <span class="sub">Show</span>
+    <nav class="seg" data-tag-filter="#means,#alltable,#matchtable">
+      {% for key, label in show %}<button type="button" data-tag="{{ '' if key == 'all' else key }}"{% if key == 'all' %} class="on"{% endif %}>{{ label }} {{ counts[key] }}</button>{% endfor %}
+    </nav>
+    <input data-filter-table="#means,#alltable,#matchtable" placeholder="Find accession, MRN, name…" aria-label="Find" style="min-width:260px">
+  </div>
+  <div id="means-wrap" class="tablewrap">
+    <table class="grid" id="means" data-copy-skip="0">
+      <thead><tr><th>Save</th>{% for c in columns %}<th title="{{ computed.get(c, 'MeaNS column' if c in means_columns else 'From the source files') }}">{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody id="means-body">
+      {% for m in means %}
+        <tr class="st-{{ m.row.state }}" data-tags="{{ m.tags }}" title="{{ state_names[m.row.state] }}{% if m.notes %}: {{ m.notes|join('; ') }}{% endif %}">
+          <td><input type="checkbox" aria-label="Save {{ m.row.accession }}"{% if m.row.include %} checked{% endif %}
+               hx-post="/fetch/include" hx-vals='{{ {"row": m.i}|tojson }}' hx-include="this" name="on" value="1" hx-target="#results" hx-swap="outerHTML" hx-trigger="change"></td>
+          {% for c, text, editable, src in m.cells %}
+            {% if editable %}<td class="edit"><input id="c-{{ m.i }}-{{ loop.index }}" name="value" value="{{ text }}" aria-label="{{ c }} of {{ m.row.accession }}" title="{{ src }}"
+                 hx-post="/fetch/cell" hx-vals='{{ {"row": m.i, "col": c}|tojson }}' hx-trigger="change" hx-target="#results" hx-swap="outerHTML"></td>
+            {% else %}<td title="{{ src }}">{{ text }}</td>{% endif %}
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="all-wrap" class="tablewrap" hidden>
+    <table class="grid" id="alltable">
+      <thead><tr>{% for c in all_columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for vals in allrows %}<tr data-tags="{{ means[loop.index0].tags }}">{% for v in vals %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <div id="match-wrap" class="tablewrap" hidden>
+    <table class="grid" id="matchtable">
+      <thead><tr><th>Accession</th><th>Masterlist</th><th>Daily sheet</th><th>Line list</th><th>Line list matched by</th><th>Notes</th></tr></thead>
+      <tbody>{% for m in means %}{% set s = m.row.sample %}<tr data-tags="{{ m.tags }}">
+        <td class="mono">{{ s.accession }}</td>
+        {% for k in ("masterlist", "daily", "linelist") %}<td>{% if s.found[k] %}<span class="badge b-PASS">✓</span>{% else %}<span class="badge b-FAIL">✗</span>{% endif %}</td>{% endfor %}
+        <td>{{ s.linelist_by }}</td><td>{{ m.notes|join("; ") }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+<dialog id="columns-dialog">
+    <form method="post" action="/fetch/columns" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <h2>Columns of the MeaNS table</h2>
+      <p class="hint">The MeaNS columns are saved to the template; the others are shown for checking.</p>
+      <div style="max-height:50vh;overflow:auto;columns:2">
+        {% for c in columns %}<label class="inline"><input type="checkbox" name="cols" value="{{ c }}" checked> {{ c }}</label>{% endfor %}
+        {% for c in means_columns if c not in columns %}<label class="inline"><input type="checkbox" name="cols" value="{{ c }}"> {{ c }}</label>{% endfor %}
+        {% for c in all_columns if c not in columns and c not in means_columns %}<label class="inline"><input type="checkbox" name="cols" value="{{ c }}"> {{ c }}</label>{% endfor %}
+      </div>
+      <div class="row"><button class="primary">Use these columns</button><button name="reset" value="1">Reset to MeaNS columns</button><button type="button" data-close-dialog>Cancel</button></div>
+    </form>
+  </dialog>
+</section>

@@ -6,6 +6,7 @@ one per signed-in user. Nothing here depends on Qt.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from . import linking, sources, tables, template
@@ -120,15 +121,18 @@ class FetchSession:
             self.regenerate_names()
         return True
 
-    def fetch(self) -> str:
-        """Link the genotyping table to the loaded sources; returns a problem to show, or ""."""
+    def fetch(self, today: date | None = None) -> str:
+        """Link the genotyping table to the loaded sources; returns a problem to show, or "".
+
+        ``today`` (for TAT) defaults to the computer's date; the server passes the lab's local date.
+        """
         if self.genotyping is None or not self.genotyping.rows:
             return "Paste or load the genotyping table first."
         if self.tables.get("masterlist") is None:
             return "The masterlist is needed to find each patient (choose it under Source files)."
         self.linked = linking.link(self.genotyping, self.tables.get("masterlist"), self.tables.get("daily"),
                                    self.tables.get("linelist"))
-        self.rows = linking.build_rows(self.linked, self.virus, self.existing_names())
+        self.rows = linking.build_rows(self.linked, self.virus, self.existing_names(), today=today)
         return ""
 
     def regenerate_names(self) -> None:

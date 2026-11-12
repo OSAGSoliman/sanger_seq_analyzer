@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Fetch data · Sanger Seq Analyzer{% endblock %}
+{% block flash %}
+{% if message %}{% if message.startswith("error:") %}<div class="notice error" role="alert">{{ message[6:] }}</div>{% else %}<div class="notice success" role="status">{{ message }}</div>{% endif %}{% endif %}
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head"><h1 style="margin:0">Fetch data</h1><span class="sub">Link the genotyping results to the lab files and add the MeaNS rows to the upload template.</span></div>
+  <h2>1. Source files</h2>
+  <p class="hint">The newest file is used unless you choose another. Files on the lab share are read again whenever they are saved; an uploaded file is kept on the server with who uploaded it.</p>
+  <div class="sources">
+  {% for c in cards %}
+    <div class="source">
+      <div class="row"><b>{{ c.label }}</b>
+        {% if c.error %}<span class="badge b-FAIL">problem</span>{% elif c.chosen %}<span class="badge b-PASS">{{ c.rows }} rows{% if c.sheets > 1 %} · {{ c.sheets }} sheets{% endif %}</span>{% else %}<span class="badge b-muted">not chosen</span>{% endif %}</div>
+      {% if c.chosen %}
+      <form method="post" action="/fetch/pin/{{ c.key }}" class="row">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <select name="candidate" aria-label="{{ c.label }} file" data-autosubmit-select>
+          <option value=""{% if not c.pinned %} selected{% endif %}>Newest: {{ c.candidates[0].label }}</option>
+          {% for k in c.candidates %}<option value="{{ k.id }}"{% if c.pinned == k.id %} selected{% endif %}>{{ k.label }}</option>{% endfor %}
+        </select>
+        <noscript><button class="small">Use</button></noscript>
+      </form>
+      {% else %}<p class="hint">e.g. “{{ c.example }}”</p>{% endif %}
+      {% if c.error %}<div class="notice error">{{ c.error }}</div>{% endif %}
+      <form method="post" action="/fetch/upload/{{ c.key }}" enctype="multipart/form-data" class="row">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="file" name="file" required accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt" aria-label="Upload {{ c.label }}">
+        {% if c.key == "template" %}<label class="inline hint"><input type="checkbox" name="force" value="1"> even if names are missing</label>{% endif %}
+        <button class="small">Upload</button>
+        {% if c.key == "template" and c.chosen and c.chosen.kind == "version" %}<a class="button small" href="/fetch/template/{{ c.chosen.id[2:] }}">Download</a>{% endif %}
+      </form>
+      {% if is_admin %}
+      <details class="hint"><summary>Shared folder for this file{% if c.folder %}: set{% endif %}</summary>
+        {% if roots %}
+        <form method="post" action="/fetch/folder/{{ c.key }}" class="row">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <select name="root"><option value="">(none)</option>{% for r in roots %}<option value="{{ r.id }}"{% if c.folder.get("root") == r.id %} selected{% endif %}>{{ r.name }}</option>{% endfor %}</select>
+          <input name="path" value="{{ c.folder.get('path', '') }}" placeholder="sub-folder (optional)">
+          <button class="small">Save</button>
+        </form>
+        {% else %}<p>Add the shared folders first under <a href="/admin/folders">Admin › Folders</a>.</p>{% endif %}
+      </details>
+      {% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>2. Genotyping results</h2>
+  {% if geno_error %}<div class="notice error">{{ geno_error }}</div>{% endif %}
+  {% if genotyping %}
+    <div class="row" style="margin-bottom:8px"><span class="sub">{{ geno_rows|length }} accessions</span><span class="grow"></span>
+      <form method="post" action="/fetch/genotyping/clear"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Clear</button></form></div>
+    <div class="tablewrap" style="max-height:260px"><table class="grid">
+      <thead><tr>{% for c in geno_cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in geno_rows %}<tr>{% for c in geno_cols %}<td>{{ row.get(c, "") if row.get(c) is not none else "" }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table></div>
+  {% else %}
+  <div class="row" style="align-items:flex-start;gap:20px">
+    <form method="post" action="/fetch/genotyping" class="stack" style="flex:2;min-width:320px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Paste the table from Excel (with its header row: SN, Accession, PCR Result, ct value, Genotyping Result, COMMENTS, FINAL)
+        <textarea name="text" required placeholder="Select the cells in Excel, Ctrl+C, then click here and Ctrl+V"></textarea></label>
+      <div><button class="primary">Use this table</button></div>
+    </form>
+    <div class="stack" style="flex:1;min-width:240px">
+      <form method="post" action="/fetch/genotyping/file" enctype="multipart/form-data" class="stack">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label>…or load a file <input type="file" name="file" required accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt"></label>
+        <div><button>Load</button></div>
+      </form>
+      {% if runs %}
+      <form method="post" action="/fetch/from-run" class="stack">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label>…or from a QC run
+          <select name="run">{% for x in runs %}<option value="{{ x.id }}">{{ x.id }} · {{ x.name }} ({{ x.n_samples }} samples)</option>{% endfor %}</select></label>
+        <div><button>Use this run</button></div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  <form method="post" action="/fetch/run" class="row" style="margin-top:14px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="inline">Strain names for <select name="virus"><option value="MVs"{% if virus == "MVs" %} selected{% endif %}>measles (MVs)</option><option value="RVs"{% if virus == "RVs" %} selected{% endif %}>rubella (RVs)</option></select></label>
+    <button class="primary"{% if not genotyping %} disabled{% endif %}>Fetch</button>
+  </form>
+</section>
+
+{% if has_rows %}{% include "_fetch_results.html" %}{% endif %}
+<dialog id="save-dialog"><div id="save-body"></div></dialog>
+{% endblock %}

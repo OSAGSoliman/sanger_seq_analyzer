@@ -119,3 +119,11 @@ iframe.viewer{width:100%;height:78vh;border:1px solid var(--border-default);bord
 .reviewbar h2{font-size:17px}
 fieldset{border:1px solid var(--border-default);border-radius:6px;padding:10px 12px}
 legend{font-weight:600;padding:0 4px}
+
+/* Fetch data */
+.sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}
+.source{border:1px solid var(--border-default);border-radius:var(--radius);padding:12px 14px;display:flex;
+  flex-direction:column;gap:8px;background:var(--bg-sunken)}
+.source select{max-width:100%;min-width:0;flex:1}
+#means td.edit input{min-width:120px}
+#means td{white-space:nowrap}
