@@ -18,8 +18,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 HEADER_SEARCH_ROWS = 40  # header must be within the first rows of a sheet
-EXCEL_SUFFIXES = (".xlsx", ".xlsm")
+EXCEL_SUFFIXES = (".xlsx", ".xlsm")  # read with openpyxl (and the only formats the template can be written in)
+BINARY_SUFFIXES = (".xlsb", ".xls", ".ods")  # Excel Binary Workbook, Excel 97-2003, OpenDocument: python-calamine
 TEXT_SUFFIXES = (".csv", ".tsv", ".txt")
+READABLE_SUFFIXES = EXCEL_SUFFIXES + BINARY_SUFFIXES + TEXT_SUFFIXES
 
 
 class TableError(ValueError):
@@ -34,6 +36,11 @@ def compact(text) -> str:
 def clean_header(text) -> str:
     """A column name as shown: single spaces, no line breaks."""
     return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def looks_like_accession(value) -> bool:
+    """True for an accession number; False for blanks, sub-header cells such as "MeV" and repeated headers."""
+    return any(ch.isdigit() for ch in as_text(value))
 
 
 def norm_key(value) -> str:
@@ -210,6 +217,33 @@ def _excel_sheets(path: Path) -> list[tuple[str, list[tuple]]]:
         wb.close()
 
 
+def _calamine_sheets(path: Path) -> list[tuple[str, list[tuple]]]:
+    """Sheets of an .xlsb, .xls or .ods file (dates come back as dates)."""
+    try:
+        from python_calamine import CalamineWorkbook
+    except ImportError as exc:  # pragma: no cover - dependency is declared
+        raise TableError(f"reading {path.suffix} files needs the python-calamine package "
+                         "(pip install python-calamine)") from exc
+    try:
+        wb = CalamineWorkbook.from_path(str(path))
+    except Exception as exc:
+        name = type(exc).__name__
+        if "Password" in name:
+            raise TableError(f"{path.name} is password protected: save a copy without the password") from exc
+        raise TableError(f"{path.name} could not be opened ({name}: {exc})") from exc
+    out = []
+    for title in wb.sheet_names:
+        try:
+            rows = wb.get_sheet_by_name(title).to_python(skip_empty_area=False)
+        except Exception:  # chart sheets and other sheets without cells
+            continue
+        rows = [tuple(None if v == "" else v for v in row) for row in rows]
+        while rows and all(v is None for v in rows[-1]):
+            rows.pop()
+        out.append((title, rows))
+    return out
+
+
 def parse_text(text: str) -> list[tuple]:
     """Rows of pasted or CSV/TSV text (tab-separated when there are tabs, else comma)."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -235,20 +269,21 @@ def read_sheets(path: str | Path) -> list[tuple[str, list[tuple]]]:
     suffix = path.suffix.lower()
     if suffix in EXCEL_SUFFIXES:
         return _excel_sheets(path)
+    if suffix in BINARY_SUFFIXES:
+        return _calamine_sheets(path)
     if suffix in TEXT_SUFFIXES:
         return _text_sheets(path)
-    if suffix == ".xls":
-        raise TableError(f"{path.name} is an old Excel 97-2003 file: open it in Excel and save it as .xlsx")
-    raise TableError(f"{path.name}: use an .xlsx, .xlsm or .csv file")
+    raise TableError(f"{path.name}: use an Excel file (.xlsx, .xlsm, .xlsb, .xls), .ods or .csv")
 
 
 def table_from_rows(name: str, sheets: list[tuple[str, list[tuple]]], expected: list[str], key: str,
-                    combine: bool = False, path: Path | None = None, min_score: int = 2) -> Table:
+                    combine: bool = False, path: Path | None = None, min_score: int = 2,
+                    key_filter=None) -> Table:
     """Find the header in each sheet and build a :class:`Table`.
 
-    ``key`` is the column every row must have (rows without it are dropped). With
-    ``combine`` every sheet that has the header is read and a "Sheet" column added;
-    otherwise only the best sheet is used.
+    ``key`` is the column every row must have (rows without it are dropped, and so are
+    rows for which ``key_filter(value)`` is False). With ``combine`` every sheet that has
+    the header is read and a "Sheet" column added; otherwise only the best sheet is used.
     """
     found = []
     for title, rows in sheets:
@@ -291,7 +326,7 @@ def table_from_rows(name: str, sheets: list[tuple[str, list[tuple]]], expected: 
             rename[c] = by_compact[k]
         key_col = match_column(key, cols)
         for r in recs:
-            if norm_key(r.get(key_col)) == "":
+            if norm_key(r.get(key_col)) == "" or (key_filter is not None and not key_filter(r.get(key_col))):
                 continue
             r = {rename.get(c, c): v for c, v in r.items()}
             if combine:
@@ -306,11 +341,13 @@ def table_from_rows(name: str, sheets: list[tuple[str, list[tuple]]], expected: 
     return table
 
 
-def read_table(path: str | Path, name: str, expected: list[str], key: str, combine: bool = False) -> Table:
+def read_table(path: str | Path, name: str, expected: list[str], key: str, combine: bool = False,
+               key_filter=None) -> Table:
     path = Path(path)
-    return table_from_rows(name, read_sheets(path), expected, key, combine=combine, path=path)
+    return table_from_rows(name, read_sheets(path), expected, key, combine=combine, path=path,
+                           key_filter=key_filter)
 
 
-def text_table(text: str, name: str, expected: list[str], key: str) -> Table:
+def text_table(text: str, name: str, expected: list[str], key: str, key_filter=None) -> Table:
     """A table from text pasted from Excel (tab-separated) or CSV."""
-    return table_from_rows(name, [("Pasted", parse_text(text))], expected, key, min_score=1)
+    return table_from_rows(name, [("Pasted", parse_text(text))], expected, key, min_score=1, key_filter=key_filter)

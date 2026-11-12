@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from .strains import COUNTRY, Numbering, city_name
-from .tables import Table, as_text, norm_key, parse_date
+from .tables import Table, as_text, looks_like_accession, norm_key, parse_date
 from .tables import compact as tables_compact
 
 
@@ -182,7 +182,7 @@ def link(genotyping: Table, masterlist: Table | None = None, daily: Table | None
     for grow in genotyping.rows:
         acc_raw = grow.get(acc_col)
         acc = as_text(acc_raw).strip()
-        if not acc:
+        if not acc or not looks_like_accession(acc):  # blank, or a sub-header cell such as "MeV"
             continue
         s = LinkedSample(acc, {"genotyping": grow, "masterlist": None, "daily": None, "linelist": None})
         if norm_key(acc) in seen:

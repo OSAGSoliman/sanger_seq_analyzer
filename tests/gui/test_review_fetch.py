@@ -167,6 +167,59 @@ def test_fetch_page_links_files_and_saves_to_template(window, tmp_path, monkeypa
     assert by["02SV269990003"].values["WHO Strain Name"] == "MVs/Dubai.ARE/11.26/9"
 
 
+def test_fetch_page_file_boxes_filter_and_newer_file(window, tmp_path):
+    import os
+    import time
+
+    from fetch_builders import GENOTYPING_TSV, build
+    files = build(tmp_path / "files")
+    tool = window.tools[0]
+    page, fc = tool.fetch, tool.fetch_controller
+    # the boxes show the lab's file names before anything is chosen
+    assert page.fields["masterlist"].placeholderText() == "Measles and Rubella Positive Masterlist 2026"
+    assert page.fields["daily"].placeholderText() == "Weekly update on measles-rubella results 09112026"
+    assert page.fields["linelist"].placeholderText() == "UAE_EMRO Measles Rubella Reporting Tool Sep 2026"
+    assert page.fields["template"].placeholderText() == "MeaNS Upload Template 2025-2026"
+    assert "*reporting tool*.xlsb" in fc.name_filter("linelist")
+    # next week's daily sheet in the same folder is offered
+    old = tmp_path / "files" / "Weekly update on measles-rubella results 02112026.xlsx"
+    os.replace(files["daily"], old)
+    for key in ("masterlist", "linelist", "template"):
+        fc.set_path(key, str(files[key]))
+    fc.set_path("daily", str(old))
+    fc.load_sources(block=True)
+    assert not page.newer["daily"].isVisibleTo(page)
+    new = tmp_path / "files" / "Weekly update on measles-rubella results 09112026.xlsx"
+    new.write_bytes(old.read_bytes())
+    later = time.time() + 60
+    os.utime(new, (later, later))
+    page.refresh_sources()
+    assert page.newer["daily"].isVisibleTo(page) and new.name in page.newer["daily"].text()
+    page.use_newer("daily")
+    assert fc.paths["daily"] == str(new)
+    from guihelpers import wait_until
+    wait_until(lambda: not fc.loading)  # the new file is read on a worker thread
+    assert fc.tables["daily"] is not None and not page.newer["daily"].isVisibleTo(page)
+
+    page.paste(GENOTYPING_TSV)
+    assert page.geno.rowCount() == 6  # the MeV rows are not shown
+    page.fetch_now()
+    assert page.row_filter.labels() == ["All 6", "To check 3", "Not in every file 1", "Ticked to save 4"]
+
+    def shown(table):
+        return [table.item(r, 0).text() for r in range(table.rowCount()) if not table.isRowHidden(r)]
+    page.row_filter.setIndex(2)
+    assert shown(page.matching) == ["02SV269990006"] and len(shown(page.means)) == 1 and len(shown(page.allcols)) == 1
+    assert page.shown_label.text() == "1 of 6 shown"
+    page.row_filter.setIndex(1)
+    assert len(shown(page.matching)) == 3
+    page.row_filter.setIndex(0)
+    page.row_search.setText("100004")  # an MRN
+    assert shown(page.matching) == ["02SV269990004"]
+    page.row_search.clear()
+    assert len(shown(page.matching)) == 6
+
+
 def test_fetch_from_qc_results(window, tmp_path):
     run_examples(window, [EXAMPLES / "bad"])
     tool = window.tools[0]

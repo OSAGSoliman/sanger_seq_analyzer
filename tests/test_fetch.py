@@ -42,9 +42,54 @@ def test_keys_and_dates_are_normalised():
 
 
 def test_pasted_genotyping_table_skips_the_second_header_line():
-    t = tables.text_table(GENOTYPING_TSV, "Genotyping", list(GENOTYPING.expected), "Accession")
+    t = tables.text_table(GENOTYPING_TSV, "Genotyping", list(GENOTYPING.expected), "Accession",
+                          key_filter=tables.looks_like_accession)
     assert [r["Accession"] for r in t.rows][:2] == ["02SV269990001", "02SV269990002"]
     assert len(t.rows) == 6 and t.column("Genotyping Result") == "Genotyping Result"
+
+
+def test_mev_row_is_ignored_wherever_it_is(tmp_path):
+    t = tables.text_table(GENOTYPING_TSV, "Genotyping", list(GENOTYPING.expected), "Accession",
+                          key_filter=tables.looks_like_accession)
+    assert all(r["Accession"].startswith("02SV") for r in t.rows) and len(t.rows) == 6
+    # also when loaded from an Excel file
+    from openpyxl import Workbook
+    wb = Workbook()
+    for line in GENOTYPING_TSV.splitlines():
+        wb.active.append([c or None for c in line.split("\t")])
+    wb.save(tmp_path / "geno.xlsx")
+    t = tables.read_table(tmp_path / "geno.xlsx", "Genotyping", list(GENOTYPING.expected), "Accession",
+                          key_filter=tables.looks_like_accession)
+    assert len(t.rows) == 6
+    # and linking skips it even without the filter
+    raw = tables.text_table(GENOTYPING_TSV, "Genotyping", list(GENOTYPING.expected), "Accession")
+    assert "MeV" in [r["Accession"] for r in raw.rows]
+    assert "MeV" not in [s.accession for s in linking.link(raw).samples]
+
+
+def test_excel_binary_workbook_is_read_with_dates():
+    from pathlib import Path
+    sheets = tables.read_sheets(Path(__file__).parent / "data" / "calamine_date.xlsb")
+    title, rows = sheets[0]
+    assert title == "Sheet1" and rows[0][0] == date(2021, 1, 1) and rows[1][0] == date(2021, 1, 2)
+
+
+def test_binary_reader_gives_the_same_table_as_the_xlsx_reader(files, monkeypatch):
+    """The .xlsb/.xls/.ods reader (calamine) and the .xlsx reader build the same line list."""
+    via_openpyxl = _read(LINELIST, files["linelist"])
+    monkeypatch.setattr(tables, "_excel_sheets", tables._calamine_sheets)
+    via_calamine = _read(LINELIST, files["linelist"])
+    assert via_calamine.columns == via_openpyxl.columns and len(via_calamine.rows) == len(via_openpyxl.rows)
+    for a, b in zip(via_calamine.rows, via_openpyxl.rows):
+        assert tables.parse_date(a["DONSET"]) == tables.parse_date(b["DONSET"])
+        assert tables.norm_key(a["LabID"]) == tables.norm_key(b["LabID"])
+
+
+def test_template_in_binary_format_cannot_be_updated(tmp_path):
+    p = tmp_path / "MeaNS Upload Template 2025-2026.xlsb"
+    p.write_bytes(b"x")
+    with pytest.raises(tables.TableError, match="save it as .xlsx"):
+        template.append_rows(p, [{"WHO Strain Name": "MVs/Dubai.ARE/1.26/9"}], list(linking.MEANS_COLUMNS))
 
 
 def test_headers_found_below_titles_and_sheets_combined(files):
@@ -60,8 +105,13 @@ def test_headers_found_below_titles_and_sheets_combined(files):
 def test_wrong_file_gives_a_readable_error(files):
     with pytest.raises(tables.TableError, match="LabID"):
         _read(LINELIST, files["masterlist"])
-    with pytest.raises(tables.TableError, match="xlsx"):
-        tables.read_sheets(files["masterlist"].with_suffix(".xls").touch() or files["masterlist"].with_suffix(".xls"))
+    broken = files["masterlist"].with_suffix(".xls")
+    broken.write_bytes(b"")
+    with pytest.raises(tables.TableError, match="could not be opened"):
+        tables.read_sheets(broken)
+    with pytest.raises(tables.TableError, match="xlsb"):
+        tables.read_sheets(files["masterlist"].with_suffix(".pdf").with_name("x.pdf").touch()
+                           or files["masterlist"].with_name("x.pdf"))
 
 
 def test_linking_follows_accession_mrn_and_labid(files):

@@ -69,6 +69,9 @@ def append_rows(path: str | Path, rows: list[dict], expected: list[str], key: st
     path = Path(path)
     if not path.is_file():
         raise TableError(f"template not found: {path}")
+    if path.suffix.lower() not in (".xlsx", ".xlsm"):
+        raise TableError(f"{path.name} cannot be updated: new rows can only be added to an .xlsx or .xlsm "
+                         "workbook. Open it in Excel and save it as .xlsx (Excel Workbook), then choose that file")
     lock = lock_file(path)
     if lock is not None:
         raise TableError(f"{path.name} is open in Excel (found {lock.name}). Close it in Excel and try again.")

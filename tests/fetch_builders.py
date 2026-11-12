@@ -14,6 +14,7 @@ from openpyxl import Workbook
 
 GENOTYPING_TSV = (
     "SN\tAccession\tPCR Result\tct value\tGenotyping Result\tCOMMENTS\tFINAL\n"
+    "\tMeV\t\t\t\t\t\n"  # the lab's sub-header row: "MeV" under Accession
     "\t\tMeV\t\t\t\t\n"
     "1\t02SV269990001\tPOSITIVE (WILD TYPE)\t23.74\t\tFAIL REINJECT FORWARD STRAND\t\n"
     "2\t02SV269990002\tPOSITIVE (WILD TYPE)\t19.69\t\tFAIL REINJECT BOTH STRANDS\t\n"

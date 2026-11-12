@@ -63,27 +63,36 @@ settings* clears them).
 
 ## Fetch data
 
-1. **Source files** (chosen once, remembered, read again when they change):
-   - *Measles and Rubella Positive Masterlist*: matched on `ACCESSION`;
-   - *Measles daily sheet*: every sheet with the header is combined; matched on
-     `MRN (reporting facility)` (the MRN from the masterlist);
-   - *MOHAP line list*: matched on `LabID` (tried against the masterlist `LAB ID`, then the daily
-     sheet `Lab ID #`, the accession and the daily sheet `Unique Identifier`); a data-dictionary
-     sheet is ignored;
-   - *MeaNS upload template*: the WHO strain names already used.
+1. **Source files** (chosen once, remembered, read again when they change; each box shows the
+   lab's file name until a file is chosen, and *Browse…* lists files of that kind first):
+   - *Measles and rubella master list* (Measles and Rubella Positive Masterlist 2026): matched on
+     `ACCESSION`;
+   - *Measles daily sheet* (Weekly update on measles-rubella results 09112026): every sheet with the
+     header is combined; matched on `MRN (reporting facility)` (the MRN from the masterlist);
+   - *MOHAP line list* (UAE_EMRO Measles Rubella Reporting Tool Sep 2026): matched on `LabID`
+     (tried against the masterlist `LAB ID`, then the daily sheet `Lab ID #`, the accession and the
+     daily sheet `Unique Identifier`); a data-dictionary sheet is ignored;
+   - *MeaNS upload template* (MeaNS Upload Template 2025-2026): the WHO strain names already used.
+
+   When a newer file of the same kind is saved in the same folder (next week's daily sheet,
+   next month's line list), the page offers it: *Newer file in this folder: … — use it*.
 
    The header row is found even below titles, and column names are compared without case,
    spaces and punctuation; IDs are compared without spaces, dashes and leading zeros
-   (`L-5001` = `l 5001`, `0100003` = `100003`). Use `.xlsx`, `.xlsm` or `.csv` (save old `.xls`
-   files as `.xlsx`).
+   (`L-5001` = `l 5001`, `0100003` = `100003`). Excel workbooks (`.xlsx`, `.xlsm`), Excel Binary
+   Workbooks (`.xlsb`), Excel 97-2003 (`.xls`), OpenDocument (`.ods`) and `.csv` can be read; the
+   MeaNS template must be `.xlsx` or `.xlsm` so that rows can be added to it.
 2. **Genotyping results**: paste the table copied from Excel (with its header: SN, Accession,
    PCR Result, ct value, Genotyping Result, COMMENTS, FINAL), load it from a file, or press
    *Use QC results* to start from the run (PASS, or FAIL REINJECT FORWARD/REVERSE/BOTH STRANDS).
-   Cells can be edited.
+   Rows without an accession number, such as the `MeV` sub-header row, are skipped. Cells can be
+   edited.
 3. **Fetch patient data** shows three views: the **MeaNS table** (editable), **All columns** (every
    column of every file for each patient) and **Matching** (which file each accession was found in,
-   and how). Rows to check are orange. *Columns…* chooses and orders the columns (MeaNS columns
-   by default).
+   and how). Rows to check are orange. *Show* limits all three views to **All**, **To check**
+   (orange rows), **Not in every file** or **Ticked to save**, and the search box finds an
+   accession, MRN, name or any other value. *Columns…* chooses and orders the columns (MeaNS
+   columns by default).
 
 MeaNS columns come from the line list first, then the masterlist and daily sheet (the tooltip of
 each cell says where it came from). *TAT* is the number of days from the receiving date to today;

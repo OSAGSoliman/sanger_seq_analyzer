@@ -16,8 +16,8 @@ from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QHeaderView, QListWidget,
-    QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QLineEdit, QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ...fetch import tables
@@ -28,14 +28,15 @@ from ..widgets.common import button, card, divider, hbox, label, vbox
 from ..widgets.notice import Notice
 from ..widgets.path_field import PathField
 from ..widgets.segmented import Segmented
-from .controller import FILE_FILTER, SPECS, FetchController
+from .controller import FILE_FILTER, SOURCE_FILES, SPECS, FetchController
 
 SOURCE_HINTS = {
-    "masterlist": "Measles and Rubella Positive Masterlist (matched on ACCESSION)",
-    "daily": "Measles daily sheet; every sheet is combined (matched on MRN (reporting facility))",
-    "linelist": "MOHAP line list (matched on LabID)",
-    "template": "MeaNS upload template: existing WHO strain names; confirmed rows are added here",
+    "masterlist": "matched on ACCESSION",
+    "daily": "every sheet is combined; matched on MRN (reporting facility)",
+    "linelist": "matched on LabID; .xlsb (Excel Binary Workbook) is fine",
+    "template": "existing WHO strain names; confirmed rows are added here (.xlsx or .xlsm)",
 }
+ROW_FILTERS = ("All", "To check", "Not in every file", "Ticked to save")
 NAME_INPUTS = {"Admin Level 1", "Case Onset Date", "Collection Date", "to upload?"}
 
 
@@ -169,21 +170,30 @@ class FetchPage(QWidget):
         lay.addWidget(self.sources_notice)
         self.fields: dict[str, PathField] = {}
         self.source_status: dict[str, object] = {}
-        for i, (key, spec) in enumerate(SPECS.items()):
+        self.newer: dict[str, object] = {}
+        for i, key in enumerate(SPECS):
             if i:
                 lay.addWidget(divider())
-            field = PathField(SOURCE_HINTS[key])
+            title_text, example, _patterns = SOURCE_FILES[key]
+            field = PathField(example)
+            field.setToolTip(f"The lab's file: {example}. {SOURCE_HINTS[key][:1].upper()}{SOURCE_HINTS[key][1:]}.")
             field.setFullText(self.c.paths.get(key, ""))
             field.pathEdited.connect(lambda text, k=key: self._path_edited(k, text))
             browse = button("Browse…", icon_name="folder")
             browse.clicked.connect(lambda _=False, k=key: self.browse(k))
             status = label("", "hint", wrap=True)
+            newer = button("", "link")
+            newer.clicked.connect(lambda _=False, k=key: self.use_newer(k))
+            newer.hide()
             self.fields[key] = field
             self.source_status[key] = status
-            title = label(spec.title, None)
+            self.newer[key] = newer
+            title = label(title_text, None)
             title.setMinimumWidth(260)
             lay.addLayout(hbox(title, field, browse))
-            lay.addWidget(status)
+            row = hbox(status, newer, spacing=12)
+            row.setStretch(0, 1)
+            lay.addLayout(row)
         self.reload = button("Reload files", icon_name="reset", size="small")
         self.reload.clicked.connect(lambda: self.c.load_sources())
         self.loading_label = label("", "secondary")
@@ -251,6 +261,16 @@ class FetchPage(QWidget):
                            self.names_button, self.export_button, self.save_button))
         self.results_summary = label("", "secondary", wrap=True)
         lay.addWidget(self.results_summary)
+        self.row_filter = Segmented([*ROW_FILTERS], equal=False, height=28)
+        self.row_filter.changed.connect(lambda _i: self.apply_row_filter())
+        self.row_search = QLineEdit()
+        self.row_search.setPlaceholderText("Find accession, MRN, name…")
+        self.row_search.setClearButtonEnabled(True)
+        self.row_search.setMinimumWidth(260)
+        self.row_search.setMaximumWidth(360)
+        self.row_search.textChanged.connect(lambda _t: self.apply_row_filter())
+        self.shown_label = label("", "secondary")
+        lay.addLayout(hbox(label("Show", "secondary"), self.row_filter, 12, self.row_search, self.shown_label, None))
         self.stack = QStackedWidget()
         self.means = QTableWidget()
         self.means.verticalHeader().setDefaultSectionSize(26)
@@ -287,11 +307,19 @@ class FetchPage(QWidget):
 
     def browse(self, key: str) -> None:
         start = self.c.paths.get(key) or self.c.store.get_str("dialogs/fetch") or str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(self, f"Choose the {SPECS[key].title}", start, FILE_FILTER)
+        title = SOURCE_FILES[key][0]
+        path, _ = QFileDialog.getOpenFileName(self, f"Choose the {title} ({SOURCE_FILES[key][1]})", start,
+                                              self.c.name_filter(key))
         if path:
             self.c.store.set("dialogs/fetch", str(Path(path).parent))
             self.fields[key].setFullText(path)
             self._path_edited(key, path)
+
+    def use_newer(self, key: str) -> None:
+        newer = self.c.newer_file(key)
+        if newer is not None:
+            self.fields[key].setFullText(str(newer))
+            self._path_edited(key, str(newer))
 
     def _path_edited(self, key: str, text: str) -> None:
         self.c.set_path(key, text)
@@ -313,13 +341,18 @@ class FetchPage(QWidget):
                 status.setText(f"✓ {table.summary()}{extra}{warn}")
                 status.setStyleSheet(f"color: {t['pass.fg']};")
             else:
-                status.setText("Not chosen" if not path else "Not read yet")
+                status.setText(f"Not chosen · {SOURCE_HINTS[key]}" if not path else "Not read yet")
                 status.setStyleSheet("")
             self.fields[key].setInvalid(bool(error))
+            newer = self.c.newer_file(key) if path else None
+            self.newer[key].setVisible(newer is not None)
+            if newer is not None:
+                self.newer[key].setText(f"Newer file in this folder: {newer.name} — use it")
+                self.newer[key].setToolTip(str(newer))
         missing = self.c.missing_paths()
         self.sources_notice.setVisible(bool(missing))
         if missing:
-            names = ", ".join(SPECS[k].title for k in missing)
+            names = ", ".join(SOURCE_FILES[k][0] for k in missing)
             self.sources_notice.set(f"Choose these files once (the app remembers them): {names}.", "neutral")
 
     def _loading(self, on: bool) -> None:
@@ -409,13 +442,43 @@ class FetchPage(QWidget):
         problems = sum(1 for r in rows if r.problems or r.sample.notes)
         self.results_summary.setText(
             f"{plural(len(rows), 'accession')} · {complete} found in every file · "
-            f"{plural(problems, 'row')} to check (orange, see Matching) · {to_save} ticked to save")
+            f"{plural(problems, 'row')} to check (orange; Show › To check lists them) · {to_save} ticked to save")
         self.fetch_status.setText(f"Fetched {plural(len(rows), 'accession')}")
         self._fill_means()
         self._fill_all()
         self._fill_matching()
+        self.apply_row_filter()
         self.save_button.setEnabled(to_save > 0 and bool(self.c.paths.get("template")))
         self.save_button.setToolTip("" if self.c.paths.get("template") else "Choose the MeaNS upload template first")
+
+    def row_matches(self, row, mode: int, text: str) -> bool:
+        if mode == 1 and not (row.problems or row.sample.notes):
+            return False
+        if mode == 2 and all(row.sample.found.values()):
+            return False
+        if mode == 3 and not row.include:
+            return False
+        if text:
+            merged = self.c.linked.merged(row.sample) if self.c.linked else {}
+            hay = " ".join(tables.as_text(v) for v in [*row.values.values(), *merged.values()]).casefold()
+            return text in hay
+        return True
+
+    def apply_row_filter(self) -> None:
+        """Show only the rows of the chosen kind (and matching the search) in all three views."""
+        rows = self.c.rows
+        counts = [len(rows), sum(1 for r in rows if r.problems or r.sample.notes),
+                  sum(1 for r in rows if not all(r.sample.found.values())), sum(1 for r in rows if r.include)]
+        self.row_filter.setLabels([f"{name} {n}" for name, n in zip(ROW_FILTERS, counts)])
+        mode, text = self.row_filter.index(), self.row_search.text().strip().casefold()
+        shown = 0
+        for i, row in enumerate(rows):
+            ok = self.row_matches(row, mode, text)
+            shown += ok
+            for table in (self.means, self.allcols, self.matching):
+                if i < table.rowCount():
+                    table.setRowHidden(i, not ok)
+        self.shown_label.setText(f"{shown} of {len(rows)} shown" if shown != len(rows) else "")
 
     def _fill_means(self) -> None:
         self._filling = True

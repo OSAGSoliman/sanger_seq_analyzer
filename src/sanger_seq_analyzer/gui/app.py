@@ -228,8 +228,11 @@ def self_test(outdir: Path) -> int:
             book = template.write_workbook(Path(tmp) / "self_test.xlsx", [
                 ("MeaNS", list(linking.MEANS_COLUMNS), [["MVs/Dubai.ARE/1.26"] + [""] * 18])])
             back = tables.read_table(book, "template", list(linking.MEANS_COLUMNS), "WHO Strain Name")
-            report["fetch"] = {"page": "fetch" in window.pages, "rows": len(back.rows)}
-            fetch_ok = report["fetch"] == {"page": True, "rows": 1}
+            from python_calamine import CalamineWorkbook  # .xlsb / .xls reader is bundled
+            via_calamine = CalamineWorkbook.from_path(str(book)).get_sheet_by_name("MeaNS").to_python()
+            report["fetch"] = {"page": "fetch" in window.pages, "rows": len(back.rows),
+                               "xlsb_reader": via_calamine[1][0] == "MVs/Dubai.ARE/1.26"}
+            fetch_ok = report["fetch"] == {"page": True, "rows": 1, "xlsb_reader": True}
             report["ok"] = ((result.count("PASS"), result.count("FAIL")) == (3, 8) and written == expected
                             and fetch_ok)
             window.close()

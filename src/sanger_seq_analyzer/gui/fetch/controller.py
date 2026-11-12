@@ -7,6 +7,7 @@ Files are read again only when they changed on disk.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 from pathlib import Path
 
@@ -18,7 +19,17 @@ from ..persist import Store
 
 log = logging.getLogger("sanger_seq_analyzer.gui")
 SPECS: dict[str, SourceSpec] = {s.key: s for s in (MASTERLIST, DAILY, LINELIST, TEMPLATE)}
-FILE_FILTER = "Spreadsheets (*.xlsx *.xlsm *.csv *.tsv *.txt);;All files (*)"
+# key -> (label, the lab's file name, name patterns used by Browse… and to spot a newer version in the same folder)
+SOURCE_FILES = {
+    "masterlist": ("Measles and rubella master list", "Measles and Rubella Positive Masterlist 2026",
+                   ("*masterlist*",)),
+    "daily": ("Measles daily sheet", "Weekly update on measles-rubella results 09112026",
+              ("*measles*rubella*results*", "*daily*sheet*")),
+    "linelist": ("MOHAP line list", "UAE_EMRO Measles Rubella Reporting Tool Sep 2026",
+                 ("*reporting tool*", "*line*list*")),
+    "template": ("MeaNS upload template", "MeaNS Upload Template 2025-2026", ("*means*template*",)),
+}
+FILE_FILTER = "Spreadsheets (*.xlsx *.xlsm *.xlsb *.xls *.ods *.csv *.tsv *.txt);;All files (*)"
 
 
 def read_source(spec: SourceSpec, path: str | Path) -> tables.Table:
@@ -78,6 +89,42 @@ class FetchController(QObject):
         self.tables[key], self.errors[key] = None, ""
         self._stamps.pop(key, None)
         self.sourcesChanged.emit()
+
+    def name_filter(self, key: str) -> str:
+        """File-dialog filter showing the lab's files of this kind first, then every spreadsheet."""
+        label, _example, patterns = SOURCE_FILES[key]
+        globs = " ".join(f"{p}{suffix}" for p in patterns for suffix in tables.READABLE_SUFFIXES
+                         if suffix not in (".txt", ".tsv"))
+        return f"{label} ({globs});;{FILE_FILTER}"
+
+    def newer_file(self, key: str) -> Path | None:
+        """A more recently saved file of the same kind in the chosen file's folder (e.g. next week's sheet)."""
+        path = self.paths.get(key)
+        if not path:
+            return None
+        current = Path(path)
+        folder = current.parent
+        try:
+            current_time = current.stat().st_mtime if current.is_file() else -1.0
+            entries = list(folder.iterdir())
+        except OSError:
+            return None
+        patterns = SOURCE_FILES[key][2]
+        best, best_time = None, current_time
+        for f in entries:
+            name = f.name.lower()
+            if (name.startswith(("~$", ".")) or f.suffix.lower() not in tables.READABLE_SUFFIXES
+                    or not any(fnmatch.fnmatch(name, p) for p in patterns)):
+                continue
+            try:
+                if not f.is_file() or f.resolve() == current.resolve():
+                    continue
+                t = f.stat().st_mtime
+            except OSError:
+                continue
+            if t > best_time:
+                best, best_time = f, t
+        return best
 
     def _stamp(self, path: str) -> tuple | None:
         try:
@@ -164,7 +211,7 @@ class FetchController(QObject):
     def set_genotyping_text(self, text: str) -> bool:
         try:
             self.genotyping = tables.text_table(text, GENOTYPING.title, list(GENOTYPING.expected),
-                                                GENOTYPING.match_column)
+                                                GENOTYPING.match_column, key_filter=tables.looks_like_accession)
             self.genotyping_error = ""
         except tables.TableError as exc:
             self.genotyping_error = f"{exc}. Copy the table from Excel including its header row (SN, Accession, ...)."
@@ -176,7 +223,7 @@ class FetchController(QObject):
     def set_genotyping_file(self, path: str | Path) -> bool:
         try:
             self.genotyping = tables.read_table(path, GENOTYPING.title, list(GENOTYPING.expected),
-                                                GENOTYPING.match_column)
+                                                GENOTYPING.match_column, key_filter=tables.looks_like_accession)
             self.genotyping_error = ""
         except tables.TableError as exc:
             self.genotyping_error = str(exc)
@@ -187,8 +234,9 @@ class FetchController(QObject):
 
     def set_genotyping_rows(self, columns: list[str], rows: list[dict]) -> None:
         """The table as edited in the window."""
-        self.genotyping = tables.Table(GENOTYPING.title, columns, [r for r in rows if any(str(v or "").strip()
-                                                                                          for v in r.values())])
+        acc = tables.match_column("Accession", columns)
+        self.genotyping = tables.Table(GENOTYPING.title, columns,
+                                       [r for r in rows if tables.looks_like_accession(r.get(acc))])
         self.genotyping_error = ""
 
     def genotyping_from_run(self, run, reviews) -> None:
