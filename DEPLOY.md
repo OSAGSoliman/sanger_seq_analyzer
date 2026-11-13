@@ -73,7 +73,8 @@ sudo mount -t cifs //fileserver/Virology /mnt/virology -o credentials=/root/.smb
 mkdir -p sanger-seq/data && cd sanger-seq
 sudo chown 10001:10001 data                    # the container runs as user 10001
 cp /path/to/repo/packaging/server/docker-compose.yml .
-# load the image (from the release; or build it, see the compose file)
+# load the image: from the release, or for testing from the "sanger-seq-server-image" artifact of a CI run
+# (that artifact also has a docker-compose.yml ready for the loaded image)
 gunzip -c sanger-seq-server-image.tar.gz | docker load
 # edit docker-compose.yml: image tag, and the "/mnt/virology:/shares/virology" volume line
 docker compose up -d
